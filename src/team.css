@@ -1,0 +1,30 @@
+.team-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.team-actions small { padding: 6px 9px; border-radius: 20px; background: #f2f2ef; color: var(--muted); font-size: 9px; }
+.team-actions button { border: 1px solid #dfe0e7; border-radius: 8px; background: #fff; color: var(--indigo); padding: 6px 9px; font-size: 9px; font-weight: 800; }
+.team-manager { margin: 16px 21px; padding: 14px; border: 1px solid #e0e1f2; border-radius: 13px; background: #f8f8ff; }
+.team-manager form { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 7px; }
+.team-manager input { min-width: 0; padding: 9px; border: 1px solid #dcdee6; border-radius: 8px; outline: 0; font-size: 10px; }
+.team-manager input:focus { border-color: var(--indigo); }
+.team-manager form button { border: 0; border-radius: 8px; background: var(--indigo); color: #fff; padding: 0 13px; font-size: 10px; font-weight: 800; }
+.manage-list { max-height: 170px; margin-top: 11px; overflow: auto; }
+.manage-list > div { display: flex; align-items: center; justify-content: space-between; padding: 8px 3px; border-top: 1px solid #e5e5ef; }
+.manage-list span { display: grid; gap: 3px; }
+.manage-list b { font-size: 10px; }
+.manage-list small { color: var(--muted); font-size: 9px; }
+.manage-list > div > button { border: 0; background: transparent; color: #b64e4e; font-size: 9px; font-weight: 700; }
+@media (max-width: 600px) {
+  .team-manager form { grid-template-columns: 1fr 1fr; }
+  .team-manager form button { min-height: 36px; }
+  .team-actions small { display: none; }
+}
+.report-card { min-height: 420px; }
+.report-tools { padding: 13px 16px; display: flex; align-items: end; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); }
+.report-tools label { display: grid; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 800; }
+.report-tools input { padding: 8px; border: 1px solid #dfe0e6; border-radius: 8px; color: var(--ink); }
+.report-tools button { border: 0; border-radius: 9px; padding: 10px 12px; background: var(--indigo); color: #fff; font-size: 9px; font-weight: 800; }
+.report-table { max-height: 330px; overflow: auto; }
+.report-table table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 9px; }
+.report-table th { position: sticky; top: 0; padding: 9px 7px; background: #f2f2fb; color: #5f6575; text-align: right; }
+.report-table th:first-child, .report-table td:first-child { text-align: left; }
+.report-table td { padding: 8px 7px; border-bottom: 1px solid var(--line); text-align: right; }
+.report-table td:last-child { background: #fff4d7; }

@@ -1,0 +1,44 @@
+[
+  {
+    "first": "Amélie",
+    "last": "Martin",
+    "role": "Accueil",
+    "color": "coral"
+  },
+  {
+    "first": "Amine",
+    "last": "Bensaïd",
+    "role": "Caisse",
+    "color": "purple"
+  },
+  {
+    "first": "Ambre",
+    "last": "Dupont",
+    "role": "Service",
+    "color": "blue"
+  },
+  {
+    "first": "Camille",
+    "last": "Robert",
+    "role": "Caisse",
+    "color": "green"
+  },
+  {
+    "first": "Lucas",
+    "last": "Bernard",
+    "role": "Service",
+    "color": "amber"
+  },
+  {
+    "first": "Sarah",
+    "last": "Petit",
+    "role": "Accueil",
+    "color": "pink"
+  },
+  {
+    "first": "Aniss",
+    "last": "Belhaq",
+    "role": "Salle",
+    "color": "blue"
+  }
+]

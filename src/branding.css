@@ -1,0 +1,53 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap");
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: "Poppins", Arial, sans-serif;
+}
+
+.brand > b {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #b51f2a;
+  font-size: 0;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.brand > b::after {
+  content: "BEEF HOUSE";
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+}
+
+.brand strong,
+h1,
+.cardhead h2,
+.emptylog > strong {
+  font-family: "Poppins", Arial, sans-serif;
+}
+
+.login-logo {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: #b51f2a;
+  font-size: 0;
+}
+
+.login-logo::after {
+  content: "BEEF HOUSE";
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+}
