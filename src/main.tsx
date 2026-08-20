@@ -4,6 +4,7 @@ import App from "./App";
 import "./index.css";
 import "./team.css";
 import "./branding.css";
+import "./superadmin.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
