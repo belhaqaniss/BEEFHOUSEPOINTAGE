@@ -14,6 +14,14 @@ const adminColumns = db.prepare("PRAGMA table_info(admins)").all();
 if (!adminColumns.some(column => column.name === "role")) {
   db.exec("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
 }
+const detailColumns = db.prepare("PRAGMA table_info(daily_details)").all();
+for (const [name, definition] of [
+  ["fdc_final", "TEXT NOT NULL DEFAULT ''"], ["cb_amount", "TEXT NOT NULL DEFAULT ''"],
+  ["cash_amount", "TEXT NOT NULL DEFAULT ''"], ["total_amount", "TEXT NOT NULL DEFAULT ''"],
+  ["created_by", "INTEGER REFERENCES admins(id)"]
+]) if (!detailColumns.some(column => column.name === name)) db.exec(`ALTER TABLE daily_details ADD COLUMN ${name} ${definition}`);
+const financialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
+if(!financialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
 
 const hashPassword = (password, salt) => scryptSync(password, salt, 64).toString("hex");
 const seedAdminAccount = (username, password, role) => {
@@ -46,7 +54,7 @@ const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, {});
   const url = new URL(req.url, "http://server.internal");
   if (url.pathname === "/api/health") return json(res, 200, { success:true, database:"sqlite" });
-  if (url.pathname !== "/api") return json(res, 404, { success:false, message:"Route introuvable" });
+  if (url.pathname !== "/api" && url.pathname !== "/") return json(res, 404, { success:false, message:"Route introuvable" });
   try {
     if (req.method === "GET" && (url.searchParams.get("action") || "employees") === "employees") return json(res, 200, employees());
     if (req.method !== "POST") return json(res, 405, { success:false, message:"Méthode refusée" });
@@ -68,18 +76,72 @@ const server = createServer(async (req, res) => {
       requireOperationalAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
+      const lastEvent=db.prepare("SELECT type FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
+      if(String(data.mode)==="Arrivée"&&lastEvent?.type==="Arrivée") throw Object.assign(new Error("Cette personne a déjà pointé son arrivée. Enregistrez d’abord son départ."),{status:409});
+      if(String(data.mode)==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
       db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,signature) VALUES(?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),String(data.signature||""));
       return json(res,200,{success:true});
     }
-    if (data.action === "details") { requireOperationalAdmin(req); db.prepare("INSERT INTO daily_details(work_date,cashier_morning,cashier_evening,fdc_morning,fdc_evening) VALUES(?,?,?,?,?)").run(String(data.workDate||String(data.date).slice(0,10)),String(data.cashierMorning||""),String(data.cashierEvening||""),String(data.fdcMorning||""),String(data.fdcEvening||"")); return json(res,200,{success:true}); }
+    if (data.action === "details") {
+      const current=requireOperationalAdmin(req),workDate=String(data.workDate||String(data.date).slice(0,10));
+      const entries=Array.isArray(data.entries)?data.entries:[];
+      db.exec("BEGIN");
+      try {
+        db.prepare("INSERT INTO daily_details(work_date,cashier_morning,cashier_evening,fdc_morning,fdc_evening,fdc_final,cb_amount,cash_amount,total_amount,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)").run(workDate,String(data.cashierMorning||""),String(data.cashierEvening||""),String(data.fdcMorning||""),String(data.fdcEvening||""),String(data.fdcFinal||""),String(data.cbAmount||""),String(data.cashAmount||""),String(data.totalAmount||""),current.id);
+        db.prepare("DELETE FROM financial_entries WHERE entry_date=? AND source_detail=1").run(workDate);
+        const insert=db.prepare("INSERT INTO financial_entries(entry_date,kind,label,amount_cents,note,source_detail,created_by) VALUES(?,?,?,?,?,1,?)");
+        for(const entry of entries){const label=String(entry.label||"").trim(),amount=Number(entry.amount),kind=entry.kind==="offert"?"offert":"depense";if(label&&Number.isFinite(amount)&&amount>=0)insert.run(workDate,kind,label,Math.round(amount*100),String(entry.note||"").trim(),current.id);}
+        db.exec("COMMIT");
+      } catch(error){db.exec("ROLLBACK");throw error;}
+      return json(res,200,{success:true});
+    }
+    if (data.action === "dailyDetails") {
+      requireAdmin(req);const workDate=String(data.workDate||"");
+      const detail=db.prepare("SELECT id,work_date AS workDate,cashier_morning AS cashierMorning,cashier_evening AS cashierEvening,fdc_morning AS fdcMorning,fdc_evening AS fdcEvening,fdc_final AS fdcFinal,cb_amount AS cbAmount,cash_amount AS cashAmount,total_amount AS totalAmount,created_at AS createdAt FROM daily_details WHERE work_date=? ORDER BY id DESC LIMIT 1").get(workDate)||null;
+      const entries=db.prepare("SELECT id,kind,label,amount_cents/100.0 AS amount,note FROM financial_entries WHERE entry_date=? AND source_detail=1 ORDER BY kind,id").all(workDate);
+      return json(res,200,{success:true,detail,entries});
+    }
     if (data.action === "report") { requireOperationalAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "exportAttendance") { requireAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "monthlyHours") {
+      requireSuperAdmin(req);
+      const month=String(data.month||"");
+      if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Mois invalide");
+      const staff=db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
+      const events=db.prepare("SELECT a.employee_id AS employeeId,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a WHERE substr(a.work_date,1,7)=? ORDER BY a.employee_id,a.work_date,a.timestamp,a.id").all(month);
+      const employees=staff.map(employee=>{
+        const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map(),firstArrivalByDate=new Set();let totalMs=0,shifts=0;
+        for(const event of own){
+          if(event.type==="Arrivée"){
+            let start=new Date(event.timestamp);
+            if(!firstArrivalByDate.has(event.workDate)&&event.scheduledStartMinutes!==null){const planned=new Date(`${event.workDate}T00:00:00`);planned.setMinutes(Number(event.scheduledStartMinutes));if(start<planned)start=planned;}
+            firstArrivalByDate.add(event.workDate);openByDate.set(event.workDate,start);
+          } else {
+            const start=openByDate.get(event.workDate),end=new Date(event.timestamp);
+            if(start&&!Number.isNaN(end.getTime())){totalMs+=Math.max(0,end.getTime()-start.getTime());shifts++;openByDate.delete(event.workDate);}
+          }
+        }
+        const totalMinutes=Math.round(totalMs/60000);
+        return {...employee,totalMinutes,shifts,days:new Set(own.map(event=>event.workDate)).size};
+      });
+      return json(res,200,{success:true,month,employees,totalMinutes:employees.reduce((sum,employee)=>sum+employee.totalMinutes,0)});
+    }
     if (data.action === "updateAttendance") {
       requireOperationalAdmin(req);
       const id=Number(data.id),timestamp=String(data.timestamp||""),parsed=new Date(timestamp);
       if(!Number.isInteger(id)||Number.isNaN(parsed.getTime())) throw new Error("Heure de pointage invalide");
       const result=db.prepare("UPDATE attendance SET timestamp=? WHERE id=?").run(parsed.toISOString(),id);
       if(!result.changes) throw Object.assign(new Error("Pointage introuvable"),{status:404});
+      return json(res,200,{success:true});
+    }
+    if (data.action === "deleteAttendancePair") {
+      requireOperationalAdmin(req);
+      const ids=Array.isArray(data.ids)?data.ids.map(Number).filter(Number.isInteger):[];
+      if(!ids.length||ids.length>2) throw new Error("Horaire invalide");
+      const remove=db.prepare("DELETE FROM attendance WHERE id=?");
+      db.exec("BEGIN");
+      try { for(const id of ids)remove.run(id);db.exec("COMMIT"); }
+      catch(error){db.exec("ROLLBACK");throw error;}
       return json(res,200,{success:true});
     }
     if (data.action === "superDashboard") {

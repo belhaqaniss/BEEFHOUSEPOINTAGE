@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS daily_details (
   cashier_evening TEXT NOT NULL,
   fdc_morning TEXT NOT NULL,
   fdc_evening TEXT NOT NULL,
+  fdc_final TEXT NOT NULL DEFAULT '',
+  cb_amount TEXT NOT NULL DEFAULT '',
+  cash_amount TEXT NOT NULL DEFAULT '',
+  total_amount TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES admins(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -57,6 +62,7 @@ CREATE TABLE IF NOT EXISTS financial_entries (
   label TEXT NOT NULL,
   amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
   note TEXT,
+  source_detail INTEGER NOT NULL DEFAULT 0 CHECK (source_detail IN (0, 1)),
   created_by INTEGER REFERENCES admins(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

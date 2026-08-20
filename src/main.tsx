@@ -5,6 +5,7 @@ import "./index.css";
 import "./team.css";
 import "./branding.css";
 import "./superadmin.css";
+import "./daily-details.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
