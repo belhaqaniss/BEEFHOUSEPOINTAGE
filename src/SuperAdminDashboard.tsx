@@ -5,6 +5,7 @@ import "./super-employees.css";
 import { downloadDailyExcel } from "./dailyExcel";
 import "./super-export.css";
 import "./monthly-hours.css";
+import "./super-tabs.css";
 import { apiUrl } from "./apiUrl";
 
 type DashboardData = {
@@ -32,6 +33,7 @@ export default function SuperAdminDashboard(){
   const[financialForm,setFinancialForm]=useState({date:new Date().toLocaleDateString("en-CA"),kind:"depense",label:"",amount:"",note:""});
   const[employeeForm,setEmployeeForm]=useState({first:"",last:"",role:""});
   const[exportDate,setExportDate]=useState(new Date().toLocaleDateString("en-CA"));
+  const[view,setView]=useState<"overview"|"planning"|"finance"|"team">("overview");
   const[hoursMonth,setHoursMonth]=useState(new Date().toLocaleDateString("en-CA").slice(0,7)),[monthlyHours,setMonthlyHours]=useState<{totalMinutes:number;employees:Array<{id:number;first:string;last:string;role:string;color:string;totalMinutes:number;shifts:number;days:number}>}|null>(null),[hoursLoading,setHoursLoading]=useState(false);
   const refresh=useCallback(async()=>{setLoading(true);setError("");try{setData(await request({action:"superDashboard"}))}catch(e){setError(e instanceof Error?e.message:"Chargement impossible")}finally{setLoading(false)}},[]);
   useEffect(()=>{void refresh()},[refresh]);
@@ -53,11 +55,14 @@ export default function SuperAdminDashboard(){
   const chartMax=Math.max(1,...data.financial.days.flatMap(day=>[day.depense,day.offert]));
   const money=(value:number)=>new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR"}).format(value);
   const duration=(minutes:number)=>`${Math.floor(minutes/60)} h ${String(minutes%60).padStart(2,"0")}`;
-  return <section className="super-dashboard">
-    <div className="super-hero"><div><span className="super-kicker">CENTRE DE CONTRÔLE</span><h2>Vue d’ensemble BEEF HOUSE</h2><p>Employés, accès et activité en temps réel depuis SQLite.</p></div><button onClick={refresh}>↻ Actualiser</button></div>
+  const sectionTitle={overview:"Vue d’ensemble BEEF HOUSE",planning:"Planning de l’équipe",finance:"Finances de l’établissement",team:"Équipe et accès"}[view];
+  const sectionDescription={overview:"Indicateurs, heures et activité récente.",planning:"Préparez les horaires des prochaines semaines.",finance:"Suivez les dépenses et les offerts.",team:"Gérez les employés et les comptes administrateurs."}[view];
+  return <section className={`super-dashboard view-${view}`}>
+    <div className="super-hero"><div><span className="super-kicker">CENTRE DE CONTRÔLE</span><h2>{sectionTitle}</h2><p>{sectionDescription}</p></div><button onClick={refresh}>↻ Actualiser</button></div>
+    <nav className="super-section-nav" aria-label="Sections du super administrateur"><button className={view==="overview"?"active":""} onClick={()=>setView("overview")}>⌂ Vue d’ensemble</button><button className={view==="planning"?"active":""} onClick={()=>setView("planning")}>▦ Planning</button><button className={view==="finance"?"active":""} onClick={()=>setView("finance")}>€ Finances</button><button className={view==="team"?"active":""} onClick={()=>setView("team")}>● Équipe &amp; accès</button></nav>
     {error&&<div className="super-alert">{error}<button onClick={()=>setError("")}>×</button></div>}
-    <div className="super-stats">{cards.map(([label,value,icon,tone])=><article className={`stat-card ${tone}`} key={String(label)}><div><span>{label}</span><strong>{value}</strong></div><b>{icon}</b></article>)}</div>
-    <div className="super-export"><div><strong>Pointage de la journée</strong><small>Télécharger les arrivées, départs et heures calculées au format Excel.</small></div><label>Date<input type="date" value={exportDate} onChange={e=>setExportDate(e.target.value)}/></label><button onClick={exportAttendance}>↓ Télécharger Excel</button></div>
+    <div hidden={view!=="overview"} className="super-stats">{cards.map(([label,value,icon,tone])=><article className={`stat-card ${tone}`} key={String(label)}><div><span>{label}</span><strong>{value}</strong></div><b>{icon}</b></article>)}</div>
+    <div hidden={view!=="overview"} className="super-export"><div><strong>Pointage de la journée</strong><small>Télécharger les arrivées, départs et heures calculées au format Excel.</small></div><label>Date<input type="date" value={exportDate} onChange={e=>setExportDate(e.target.value)}/></label><button onClick={exportAttendance}>↓ Télécharger Excel</button></div>
     <article className="super-panel monthly-hours-panel"><div className="panel-title"><div><h3>Cumul mensuel des heures</h3><p>Heures réellement travaillées, corrigées selon le planning en cas d’arrivée anticipée.</p></div><label>Mois<input type="month" value={hoursMonth} onChange={e=>setHoursMonth(e.target.value)}/></label></div>{hoursLoading?<div className="super-loading">Calcul des heures…</div>:monthlyHours?<><div className="monthly-hours-summary"><span>Total de l’équipe</span><strong>{duration(monthlyHours.totalMinutes)}</strong><small>{new Date(`${hoursMonth}-01T12:00:00`).toLocaleDateString("fr-FR",{month:"long",year:"numeric"})}</small></div><div className="monthly-hours-table"><table><thead><tr><th>Employé</th><th>Jours pointés</th><th>Services terminés</th><th>Total du mois</th></tr></thead><tbody>{monthlyHours.employees.map(employee=><tr key={employee.id}><td><span className={`mini-avatar ${employee.color}`}>{employee.first[0]}{employee.last[0]}</span><div><b>{employee.first} {employee.last}</b><small>{employee.role}</small></div></td><td>{employee.days}</td><td>{employee.shifts}</td><td><strong>{duration(employee.totalMinutes)}</strong></td></tr>)}</tbody></table></div></>:<div className="super-empty">Aucune donnée pour ce mois.</div>}</article>
     <Planning employees={data.employees} request={request}/>
     <article className="super-panel finance-panel">

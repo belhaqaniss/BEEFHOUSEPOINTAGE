@@ -1,0 +1,7 @@
+.super-section-nav{position:sticky;top:12px;z-index:20;width:100%;margin:0;padding:6px;grid-template-columns:repeat(4,1fr);border-color:#e1d7d8;background:#f3eeee;box-shadow:0 8px 24px #2a182014}
+.super-section-nav button{padding:12px 9px;font-size:10px}.super-section-nav button.active{color:#b51f2a}
+.view-overview .planning-panel,.view-overview .finance-panel,.view-overview .admin-panel,.view-overview .super-grid.lower{display:none}.view-overview .super-grid:not(.lower){grid-template-columns:1fr}
+.view-planning .super-stats,.view-planning .super-export,.view-planning .monthly-hours-panel,.view-planning .finance-panel,.view-planning .super-grid{display:none}
+.view-finance .super-stats,.view-finance .super-export,.view-finance .monthly-hours-panel,.view-finance .planning-panel,.view-finance .super-grid{display:none}
+.view-team .super-stats,.view-team .super-export,.view-team .monthly-hours-panel,.view-team .planning-panel,.view-team .finance-panel,.view-team .activity-panel{display:none}.view-team .super-grid:not(.lower){grid-template-columns:1fr}.view-team .admin-panel{max-width:520px}
+@media(max-width:540px){.super-section-nav{position:static;grid-template-columns:1fr 1fr}.super-section-nav button{font-size:9px}}
