@@ -15,7 +15,7 @@ type AttendancePair={name:string;index:number;arrival?:AttendanceRecord;departur
 const defaultPeople:Person[]=[
  {first:"Amélie",last:"Martin",role:"Accueil",color:"coral"},{first:"Amine",last:"Bensaïd",role:"Caisse",color:"purple"},{first:"Ambre",last:"Dupont",role:"Service",color:"blue"},{first:"Camille",last:"Robert",role:"Caisse",color:"green"},{first:"Lucas",last:"Bernard",role:"Service",color:"amber"},{first:"Sarah",last:"Petit",role:"Accueil",color:"pink"},{first:"Aniss",last:"Belhaq",role:"Salle",color:"blue"}
 ];
-const api=async(data:object)=>{const token=sessionStorage.getItem("presence-token");const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(data)});const result=await response.json();if(!response.ok||result?.success===false)throw new Error(result.message||"Erreur du serveur");return result;};
+const api=async(data:object)=>{const token=sessionStorage.getItem("presence-token");const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(data)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result?.success===false)throw new Error(result.message||"Erreur du serveur");return result;};
 const tabForRole=(role:string):"pointage"|"superadmin"|"hyperadmin"=>role==="hyperadmin"?"hyperadmin":role==="superadmin"?"superadmin":"pointage";
 
 function Signature({setValue}:{setValue:(s:string)=>void}){
