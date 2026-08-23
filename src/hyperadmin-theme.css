@@ -1,0 +1,21 @@
+main:has(.hyper-dashboard){background:radial-gradient(circle at 80% 0,#f8e8be 0,transparent 26%),#f5f3ef}
+main:has(.hyper-dashboard)>header{height:88px;background:#111318;color:#fff;border-bottom:3px solid #c89a3d}
+main:has(.hyper-dashboard)>header .brand>b{width:48px;height:48px;background:linear-gradient(145deg,#d7ad55,#9c681f);font-size:0;box-shadow:0 8px 22px #0005}
+main:has(.hyper-dashboard)>header .brand>b:after{content:"BH";font:800 14px Georgia;color:#fff}
+main:has(.hyper-dashboard)>header .brand strong{font-size:0;color:#fff}
+main:has(.hyper-dashboard)>header .brand strong:after{content:"BEEF HOUSE NETWORK";font:700 15px Georgia;letter-spacing:.08em}
+main:has(.hyper-dashboard)>header .brand small{color:#d6bd88}
+main:has(.hyper-dashboard)>header .logout{border-color:#ffffff35;background:#ffffff10;color:#fff}
+main:has(.hyper-dashboard)>header .date{color:#d8d4cb}
+.hyper-dashboard{padding:4px;border-radius:28px}
+.hyper-heading{position:relative;min-height:190px;padding:38px 42px;overflow:hidden;background:linear-gradient(125deg,#090b10 0,#202126 55%,#6f4618 130%);border:1px solid #d3aa5838;box-shadow:0 24px 55px #17120b32}
+.hyper-heading:before{content:"◆";position:absolute;right:120px;top:-95px;color:#d5ab4f18;font-size:280px;line-height:1}
+.hyper-heading:after{content:"DIRECTION GÉNÉRALE · TOUS LES ÉTABLISSEMENTS";position:absolute;left:42px;bottom:22px;color:#d7b86f;font-size:8px;font-weight:900;letter-spacing:.22em}
+.hyper-heading h2{font:600 38px Georgia;color:#fff}.hyper-heading small{color:#e4c57e}.hyper-heading>span{position:relative;background:#d0a44b18;border-color:#d7b76c66;color:#efd89e}
+.hyper-nav{width:100%;max-width:720px;padding:7px;background:#17191f;border-color:#2d3038;box-shadow:0 13px 30px #14161c26}
+.hyper-nav button{padding:14px;color:#aeb1b8}.hyper-nav button.active{background:linear-gradient(135deg,#d3ab57,#a87327);color:#fff;box-shadow:0 5px 16px #9f702b42}
+.hyper-stats article{position:relative;overflow:hidden;padding:22px;border-color:#e2d5ba;background:linear-gradient(145deg,#fff,#faf5e9);box-shadow:0 12px 30px #3a2b130c}.hyper-stats article:after{content:"";position:absolute;right:-16px;bottom:-20px;width:65px;height:65px;border-radius:50%;background:#d3aa5716}.hyper-stats strong{color:#9c691f;font-size:30px}
+.hyper-layout{grid-template-columns:1.45fr .55fr}.hyper-layout>.super-panel{border-color:#ded4c0;box-shadow:0 18px 42px #241b0f12}.hyper-layout .panel-title{background:#fbf8f1}.hyper-layout .panel-title h3{font-size:15px}
+.restaurant-list{padding:9px}.restaurant-list>div{margin:8px;padding:16px;border:1px solid #ece4d5;border-radius:14px;background:#fff;box-shadow:0 6px 18px #251b0e0a}.restaurant-mark{width:44px;height:44px;border-radius:13px;background:linear-gradient(145deg,#d6ac54,#97631e);box-shadow:0 7px 16px #9e6c2740}.restaurant-list strong{font-size:12px}.restaurant-status.active{background:#e5f3e9;color:#2f7756}.restaurant-create form>button{background:linear-gradient(135deg,#d3aa55,#9d681f);box-shadow:0 8px 18px #a3702935}
+.hyper-dashboard>.super-dashboard{padding:18px;border:1px solid #d8c79f;border-radius:22px;background:#fffaf0}.hyper-dashboard>.super-dashboard>.super-hero{background:linear-gradient(135deg,#25272d,#68451d)}
+@media(max-width:700px){.hyper-heading{min-height:170px;padding:28px}.hyper-heading h2{font-size:29px}.hyper-heading:after{left:28px}.hyper-layout{grid-template-columns:1fr}}

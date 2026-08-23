@@ -14,6 +14,7 @@ const adminColumns = db.prepare("PRAGMA table_info(admins)").all();
 if (!adminColumns.some(column => column.name === "role")) {
   db.exec("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
 }
+if (!adminColumns.some(column => column.name === "restaurant_id")) db.exec("ALTER TABLE admins ADD COLUMN restaurant_id INTEGER REFERENCES restaurants(id)");
 const detailColumns = db.prepare("PRAGMA table_info(daily_details)").all();
 for (const [name, definition] of [
   ["fdc_final", "TEXT NOT NULL DEFAULT ''"], ["cb_amount", "TEXT NOT NULL DEFAULT ''"],
@@ -24,6 +25,8 @@ const financialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
 if(!financialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
 
 const hashPassword = (password, salt) => scryptSync(password, salt, 64).toString("hex");
+db.prepare("INSERT OR IGNORE INTO restaurants(name,slug,address) VALUES(?,?,?)").run("BEEF HOUSE","beef-house","");
+const mainRestaurant=db.prepare("SELECT id FROM restaurants WHERE slug='beef-house'").get();
 const seedAdminAccount = (username, password, role) => {
   const existing = db.prepare("SELECT id FROM admins WHERE username = ?").get(username);
   if (existing) { db.prepare("UPDATE admins SET role=? WHERE id=?").run(role, existing.id); return; }
@@ -36,6 +39,9 @@ const seedEmployees = () => {
 };
 seedAdminAccount("admin", "admin", "admin");
 seedAdminAccount("superadmin", "superadmin", "superadmin");
+db.prepare("UPDATE admins SET restaurant_id=? WHERE restaurant_id IS NULL").run(mainRestaurant.id);
+const seedHyperAdmin=()=>{if(db.prepare("SELECT id FROM hyper_admins WHERE username='hyperadmin'").get())return;const salt=randomBytes(16).toString("hex");db.prepare("INSERT INTO hyper_admins(username,password_hash,password_salt) VALUES(?,?,?)").run("hyperadmin",hashPassword("hyperadmin",salt),salt)};
+seedHyperAdmin();
 seedEmployees();
 
 const json = (res, status, body) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN || "*", "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" }); res.end(JSON.stringify(body)); };
@@ -43,11 +49,15 @@ const body = async req => { const chunks=[]; let size=0; for await (const chunk 
 const adminFromRequest = req => {
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  return db.prepare("SELECT admins.id,admins.username,admins.role FROM sessions JOIN admins ON admins.id=sessions.admin_id WHERE token=? AND expires_at>?").get(token, new Date().toISOString());
+  const now=new Date().toISOString(),admin=db.prepare("SELECT admins.id,admins.username,admins.role,admins.restaurant_id AS restaurantId FROM sessions JOIN admins ON admins.id=sessions.admin_id WHERE token=? AND expires_at>?").get(token,now);
+  if(admin)return admin;
+  const hyper=db.prepare("SELECT hyper_admins.id,hyper_admins.username FROM hyper_sessions JOIN hyper_admins ON hyper_admins.id=hyper_sessions.hyper_admin_id WHERE token=? AND expires_at>?").get(token,now);
+  return hyper?{...hyper,role:"hyperadmin",restaurantId:null}:null;
 };
 const requireAdmin = req => { const admin=adminFromRequest(req); if(!admin) throw Object.assign(new Error("Session administrateur requise"),{status:401}); return admin; };
-const requireSuperAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="superadmin") throw Object.assign(new Error("Accès super administrateur requis"),{status:403}); return admin; };
-const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="admin") throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
+const requireSuperAdmin = req => { const admin=requireAdmin(req); if(!["superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès super administrateur requis"),{status:403}); return admin; };
+const requireHyperAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="hyperadmin") throw Object.assign(new Error("Accès Hyper Admin requis"),{status:403}); return admin; };
+const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(!["admin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
 const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
 
 const server = createServer(async (req, res) => {
@@ -61,7 +71,7 @@ const server = createServer(async (req, res) => {
     const data = await body(req);
     if (data.action === "login") {
       const admin=db.prepare("SELECT * FROM admins WHERE username=?").get(String(data.username||""));
-      if(!admin) throw Object.assign(new Error("Identifiants incorrects"),{status:401});
+      if(!admin){const hyper=db.prepare("SELECT * FROM hyper_admins WHERE username=?").get(String(data.username||""));if(!hyper)throw Object.assign(new Error("Identifiants incorrects"),{status:401});const given=Buffer.from(hashPassword(String(data.password||""),hyper.password_salt),"hex"),expected=Buffer.from(hyper.password_hash,"hex");if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("Identifiants incorrects"),{status:401});const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+8*60*60*1000).toISOString();db.prepare("DELETE FROM hyper_sessions WHERE expires_at<=?").run(new Date().toISOString());db.prepare("INSERT INTO hyper_sessions(token,hyper_admin_id,expires_at) VALUES(?,?,?)").run(token,hyper.id,expires);return json(res,200,{success:true,token,expiresAt:expires,username:hyper.username,role:"hyperadmin"});}
       const given=Buffer.from(hashPassword(String(data.password||""),admin.password_salt),"hex"),expected=Buffer.from(admin.password_hash,"hex");
       if(given.length!==expected.length||!timingSafeEqual(given,expected)) throw Object.assign(new Error("Identifiants incorrects"),{status:401});
       const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+8*60*60*1000).toISOString();
@@ -69,7 +79,19 @@ const server = createServer(async (req, res) => {
       db.prepare("INSERT INTO sessions(token,admin_id,expires_at) VALUES(?,?,?)").run(token,admin.id,expires);
       return json(res,200,{success:true,token,expiresAt:expires,username:admin.username,role:admin.role});
     }
-    if (data.action === "logout") { const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""); if(token)db.prepare("DELETE FROM sessions WHERE token=?").run(token); return json(res,200,{success:true}); }
+    if (data.action === "logout") { const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""); if(token){db.prepare("DELETE FROM sessions WHERE token=?").run(token);db.prepare("DELETE FROM hyper_sessions WHERE token=?").run(token);} return json(res,200,{success:true}); }
+    if (data.action === "hyperDashboard") {
+      requireHyperAdmin(req);
+      const restaurants=db.prepare("SELECT r.id,r.name,r.slug,r.address,r.active,r.created_at AS createdAt,COUNT(DISTINCT a.id) AS administrators FROM restaurants r LEFT JOIN admins a ON a.restaurant_id=r.id GROUP BY r.id ORDER BY r.active DESC,r.name").all();
+      const stats={restaurants:restaurants.length,activeRestaurants:restaurants.filter(item=>item.active).length,administrators:db.prepare("SELECT COUNT(*) AS value FROM admins").get().value,employees:db.prepare("SELECT COUNT(*) AS value FROM employees WHERE active=1").get().value};
+      return json(res,200,{success:true,restaurants,stats});
+    }
+    if (data.action === "createRestaurant") {
+      requireHyperAdmin(req);const name=String(data.name||"").trim(),address=String(data.address||"").trim(),username=String(data.username||"").trim(),password=String(data.password||"");const slug=String(data.slug||name).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+      if(name.length<2||!slug||username.length<3||password.length<8)throw new Error("Nom, identifiant (3 caractères) et mot de passe (8 caractères) obligatoires");
+      const salt=randomBytes(16).toString("hex");db.exec("BEGIN");try{const restaurant=db.prepare("INSERT INTO restaurants(name,slug,address) VALUES(?,?,?)").run(name,slug,address);db.prepare("INSERT INTO admins(username,password_hash,password_salt,role,restaurant_id) VALUES(?,?,?,?,?)").run(username,hashPassword(password,salt),salt,"superadmin",restaurant.lastInsertRowid);db.exec("COMMIT");}catch(error){db.exec("ROLLBACK");throw error;}return json(res,200,{success:true});
+    }
+    if (data.action === "toggleRestaurant") { requireHyperAdmin(req);const id=Number(data.id);db.prepare("UPDATE restaurants SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?").run(id);return json(res,200,{success:true}); }
     if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue")); return json(res,200,{success:true,employees:employees()}); }
     if (data.action === "deleteEmployee") { requireOperationalAdmin(req); db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
     if (data.action === "pointage") {
@@ -81,6 +103,13 @@ const server = createServer(async (req, res) => {
       if(String(data.mode)==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
       db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,signature) VALUES(?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),String(data.signature||""));
       return json(res,200,{success:true});
+    }
+    if (data.action === "attendanceStatus") {
+      requireOperationalAdmin(req);
+      const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
+      if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
+      const lastEvent=db.prepare("SELECT type,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
+      return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent});
     }
     if (data.action === "details") {
       const current=requireOperationalAdmin(req),workDate=String(data.workDate||String(data.date).slice(0,10));
