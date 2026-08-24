@@ -10,6 +10,11 @@
 .planning-group-tabs button.active { border-color:#b51f2a; box-shadow:0 0 0 1px #b51f2a; }
 .planning-group-tabs button.cuisine span { background:#fff0dc; color:#a65a00; }
 .planning-group-tabs button.active.cuisine { border-color:#d37a17; box-shadow:0 0 0 1px #d37a17; }
+.selector-toggle { padding:8px 11px; border:1px solid #d7d9df; border-radius:8px; background:#fff; color:#5d626f; font-size:8px; font-weight:800; cursor:pointer; }
+.planning-hours,
+.planning-employee { grid-template-columns:150px repeat(38,24px) 72px; }
+.planning-hours .closing-hour { min-height:35px; padding:3px 7px; color:#fff2b3; font-size:6px; font-weight:900; line-height:1.35; }
+.planning-employee .closing-cell { display:block; height:36px; border-left:2px solid #b51f2a; background:repeating-linear-gradient(135deg,#f3f3f4,#f3f3f4 5px,#e6e6e9 5px,#e6e6e9 10px); }
 
 @media (max-width: 900px) {
   .manual-planning { grid-template-columns: 1fr 1fr 1fr; }
@@ -21,4 +26,9 @@
   .manual-planning > div,
   .manual-planning label,
   .manual-planning > button { grid-column: 1; }
+}
+
+@media (max-width: 700px) {
+  .planning-hours,
+  .planning-employee { grid-template-columns:120px repeat(38,24px) 72px; }
 }
