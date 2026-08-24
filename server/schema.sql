@@ -109,6 +109,16 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
 CREATE INDEX IF NOT EXISTS idx_schedule_blocks_week
 ON schedule_blocks(work_date, employee_id, start_minutes);
 
+CREATE TABLE IF NOT EXISTS schedule_closings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  service TEXT NOT NULL DEFAULT 'soir' CHECK (service IN ('matin', 'soir')),
+  created_by INTEGER REFERENCES admins(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(employee_id, work_date, service)
+);
+
 CREATE TABLE IF NOT EXISTS tip_days (
   work_date TEXT PRIMARY KEY,
   morning_cents INTEGER NOT NULL DEFAULT 0 CHECK (morning_cents >= 0),
