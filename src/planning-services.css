@@ -2,11 +2,21 @@
   grid-template-columns: 1.4fr 1fr 1fr .7fr .65fr .65fr auto;
 }
 
+.planning-group-tabs { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px 20px; background:#f6f7f9; border-bottom:1px solid #e4e5e9; }
+.planning-group-tabs button { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto auto; column-gap:11px; padding:13px 16px; text-align:left; border:1px solid #dddfe5; border-radius:11px; background:#fff; color:#555; cursor:pointer; }
+.planning-group-tabs span { grid-row:1/3; align-self:center; display:grid; place-items:center; width:34px; height:34px; border-radius:9px; background:#f5e2e4; color:#b51f2a; font-size:17px; }
+.planning-group-tabs b { font-size:10px; }
+.planning-group-tabs small { margin-top:3px; color:#8a8e98; font-size:7px; }
+.planning-group-tabs button.active { border-color:#b51f2a; box-shadow:0 0 0 1px #b51f2a; }
+.planning-group-tabs button.cuisine span { background:#fff0dc; color:#a65a00; }
+.planning-group-tabs button.active.cuisine { border-color:#d37a17; box-shadow:0 0 0 1px #d37a17; }
+
 @media (max-width: 900px) {
   .manual-planning { grid-template-columns: 1fr 1fr 1fr; }
 }
 
 @media (max-width: 520px) {
+  .planning-group-tabs { grid-template-columns:1fr; }
   .manual-planning { grid-template-columns: 1fr; }
   .manual-planning > div,
   .manual-planning label,
