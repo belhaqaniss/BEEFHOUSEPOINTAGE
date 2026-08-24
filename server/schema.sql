@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   work_date TEXT NOT NULL,
   start_minutes INTEGER NOT NULL CHECK (start_minutes >= 420 AND start_minutes < 1560 AND start_minutes % 30 = 0),
+  service TEXT NOT NULL DEFAULT 'matin' CHECK (service IN ('matin', 'soir')),
   created_by INTEGER REFERENCES admins(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(employee_id, work_date, start_minutes)

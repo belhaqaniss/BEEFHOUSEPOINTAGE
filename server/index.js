@@ -23,6 +23,8 @@ for (const [name, definition] of [
 ]) if (!detailColumns.some(column => column.name === name)) db.exec(`ALTER TABLE daily_details ADD COLUMN ${name} ${definition}`);
 const financialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
 if(!financialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
+const scheduleColumns=db.prepare("PRAGMA table_info(schedule_blocks)").all();
+if(!scheduleColumns.some(column=>column.name==="service")){db.exec("ALTER TABLE schedule_blocks ADD COLUMN service TEXT NOT NULL DEFAULT 'matin'");db.exec("UPDATE schedule_blocks SET service=CASE WHEN start_minutes>=1020 THEN 'soir' ELSE 'matin' END");}
 
 const hashPassword = (password, salt) => scryptSync(password, salt, 64).toString("hex");
 db.prepare("INSERT OR IGNORE INTO restaurants(name,slug,address) VALUES(?,?,?)").run("BEEF HOUSE","beef-house","");
@@ -259,7 +261,7 @@ const server = createServer(async (req, res) => {
       const start=String(data.weekStart||""),endDate=new Date(`${start}T12:00:00`);
       if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||Number.isNaN(endDate.getTime())) throw new Error("Semaine invalide");
       endDate.setDate(endDate.getDate()+6);const end=endDate.toISOString().slice(0,10);
-      const blocks=db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,start_minutes AS startMinutes FROM schedule_blocks WHERE work_date BETWEEN ? AND ? ORDER BY work_date,employee_id,start_minutes").all(start,end);
+      const blocks=db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,start_minutes AS startMinutes,service FROM schedule_blocks WHERE work_date BETWEEN ? AND ? ORDER BY work_date,employee_id,start_minutes").all(start,end);
       return json(res,200,{success:true,blocks});
     }
     if (data.action === "toggleScheduleBlock") {
@@ -267,18 +269,19 @@ const server = createServer(async (req, res) => {
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isInteger(startMinutes)||startMinutes<420||startMinutes>=1560||startMinutes%30) throw new Error("Créneau invalide");
       const existing=db.prepare("SELECT id FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes=?").get(employeeId,workDate,startMinutes);
       if(existing) db.prepare("DELETE FROM schedule_blocks WHERE id=?").run(existing.id);
-      else db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,created_by) VALUES(?,?,?,?)").run(employeeId,workDate,startMinutes,current.id);
+      else db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?)").run(employeeId,workDate,startMinutes,startMinutes>=1020?"soir":"matin",current.id);
       return json(res,200,{success:true,selected:!existing});
     }
     if (data.action === "setScheduleRange") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes),endMinutes=Number(data.endMinutes);
+      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes),endMinutes=Number(data.endMinutes),service=String(data.service||"matin");
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isInteger(startMinutes)||!Number.isInteger(endMinutes)||startMinutes<420||startMinutes>=1560||endMinutes<=startMinutes||endMinutes>1560||startMinutes%30||endMinutes%30) throw new Error("La plage doit utiliser des créneaux de 30 minutes entre 07:00 et 02:00");
+      if(!["matin","soir"].includes(service))throw new Error("Service de planning invalide");
       if(!db.prepare("SELECT id FROM employees WHERE id=? AND active=1").get(employeeId)) throw Object.assign(new Error("Employé introuvable"),{status:404});
       db.exec("BEGIN");
       try {
-        db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=?").run(employeeId,workDate);
-        const insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,created_by) VALUES(?,?,?,?)");
-        for(let minutes=startMinutes;minutes<endMinutes;minutes+=30) insert.run(employeeId,workDate,minutes,current.id);
+        db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").run(employeeId,workDate,service);
+        const insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?) ON CONFLICT(employee_id,work_date,start_minutes) DO UPDATE SET service=excluded.service,created_by=excluded.created_by");
+        for(let minutes=startMinutes;minutes<endMinutes;minutes+=30) insert.run(employeeId,workDate,minutes,service,current.id);
         db.exec("COMMIT");
       } catch(error) { db.exec("ROLLBACK"); throw error; }
       return json(res,200,{success:true});
