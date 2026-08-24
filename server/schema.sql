@@ -107,3 +107,26 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
 
 CREATE INDEX IF NOT EXISTS idx_schedule_blocks_week
 ON schedule_blocks(work_date, employee_id, start_minutes);
+
+CREATE TABLE IF NOT EXISTS tip_days (
+  work_date TEXT PRIMARY KEY,
+  morning_cents INTEGER NOT NULL DEFAULT 0 CHECK (morning_cents >= 0),
+  evening_cents INTEGER NOT NULL DEFAULT 0 CHECK (evening_cents >= 0),
+  created_by INTEGER REFERENCES admins(id),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tip_allocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_date TEXT NOT NULL REFERENCES tip_days(work_date) ON DELETE CASCADE,
+  service TEXT NOT NULL CHECK (service IN ('matin', 'soir')),
+  recipient_key TEXT NOT NULL,
+  recipient_name TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+  claimed INTEGER NOT NULL DEFAULT 0 CHECK (claimed IN (0, 1)),
+  claimed_at TEXT,
+  UNIQUE(work_date, service, recipient_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tip_allocations_recipient
+ON tip_allocations(recipient_key, claimed, work_date);

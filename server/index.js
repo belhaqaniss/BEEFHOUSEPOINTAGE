@@ -59,6 +59,12 @@ const requireSuperAdmin = req => { const admin=requireAdmin(req); if(!["superadm
 const requireHyperAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="hyperadmin") throw Object.assign(new Error("Accès Hyper Admin requis"),{status:403}); return admin; };
 const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(!["admin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
 const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
+const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
+const tipOverview = workDate => {
+  const day=db.prepare("SELECT work_date AS workDate,morning_cents/100.0 AS morningAmount,evening_cents/100.0 AS eveningAmount FROM tip_days WHERE work_date=?").get(workDate)||{workDate,morningAmount:0,eveningAmount:0};
+  const allocations=db.prepare("SELECT id,work_date AS workDate,service,recipient_key AS recipientKey,recipient_name AS recipientName,amount_cents/100.0 AS amount,claimed,claimed_at AS claimedAt,(SELECT COALESCE(SUM(other.amount_cents),0)/100.0 FROM tip_allocations other WHERE other.recipient_key=tip_allocations.recipient_key AND other.claimed=0) AS accumulated FROM tip_allocations WHERE work_date=? ORDER BY service,recipient_name").all(workDate).map(row=>({...row,claimed:Boolean(row.claimed)}));
+  return {day,allocations};
+};
 
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, {});
@@ -101,15 +107,44 @@ const server = createServer(async (req, res) => {
       const lastEvent=db.prepare("SELECT type FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
       if(String(data.mode)==="Arrivée"&&lastEvent?.type==="Arrivée") throw Object.assign(new Error("Cette personne a déjà pointé son arrivée. Enregistrez d’abord son départ."),{status:409});
       if(String(data.mode)==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
+      const arrivalCount=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employee.id,String(data.workDate)).value;
+      const shift=String(data.mode)==="Arrivée"&&arrivalCount>=1?"soir":"matin";
       db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,signature) VALUES(?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),String(data.signature||""));
-      return json(res,200,{success:true});
+      return json(res,200,{success:true,shift});
     }
     if (data.action === "attendanceStatus") {
       requireOperationalAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
       const lastEvent=db.prepare("SELECT type,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
-      return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent});
+      const arrivalCount=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employee.id,String(data.workDate||new Date().toISOString().slice(0,10))).value;
+      return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",nextShift:arrivalCount>=1?"soir":"matin",lastEvent});
+    }
+    if (data.action === "tipOverview") {
+      requireOperationalAdmin(req);
+      return json(res,200,{success:true,...tipOverview(String(data.workDate||new Date().toISOString().slice(0,10)))});
+    }
+    if (data.action === "saveTips") {
+      const current=requireOperationalAdmin(req),workDate=String(data.workDate||""),morningCents=Math.max(0,Math.round(Number(data.morningAmount||0)*100)),eveningCents=Math.max(0,Math.round(Number(data.eveningAmount||0)*100));
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isFinite(morningCents)||!Number.isFinite(eveningCents))throw new Error("Date ou montant de pourboire invalide");
+      const arrivals=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,a.timestamp FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? AND a.type='Arrivée' AND e.active=1 ORDER BY a.timestamp").all(workDate);
+      const recipients={matin:new Map(),soir:new Map()};
+      for(const arrival of arrivals){const service=parisHour(arrival.timestamp)<17?"matin":"soir",isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
+      const previous=db.prepare("SELECT service,recipient_key AS recipientKey,claimed,claimed_at AS claimedAt FROM tip_allocations WHERE work_date=?").all(workDate),status=new Map(previous.map(row=>[`${row.service}:${row.recipientKey}`,row]));
+      db.exec("BEGIN");
+      try{
+        db.prepare("INSERT INTO tip_days(work_date,morning_cents,evening_cents,created_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(work_date) DO UPDATE SET morning_cents=excluded.morning_cents,evening_cents=excluded.evening_cents,created_by=excluded.created_by,updated_at=CURRENT_TIMESTAMP").run(workDate,morningCents,eveningCents,current.id);
+        db.prepare("DELETE FROM tip_allocations WHERE work_date=?").run(workDate);
+        const insert=db.prepare("INSERT INTO tip_allocations(work_date,service,recipient_key,recipient_name,amount_cents,claimed,claimed_at) VALUES(?,?,?,?,?,?,?)");
+        for(const service of ["matin","soir"]){const members=[...recipients[service].entries()],total=service==="matin"?morningCents:eveningCents;if(!members.length)continue;const base=Math.floor(total/members.length),remainder=total%members.length;members.forEach(([key,name],index)=>{const old=status.get(`${service}:${key}`);insert.run(workDate,service,key,name,base+(index<remainder?1:0),old?.claimed||0,old?.claimedAt||null);});}
+        db.exec("COMMIT");
+      }catch(error){db.exec("ROLLBACK");throw error;}
+      return json(res,200,{success:true,...tipOverview(workDate)});
+    }
+    if (data.action === "toggleTipClaimed") {
+      requireOperationalAdmin(req);const id=Number(data.id),allocation=db.prepare("SELECT work_date AS workDate,claimed FROM tip_allocations WHERE id=?").get(id);if(!allocation)throw Object.assign(new Error("Part de pourboire introuvable"),{status:404});
+      db.prepare("UPDATE tip_allocations SET claimed=?,claimed_at=? WHERE id=?").run(allocation.claimed?0:1,allocation.claimed?null:new Date().toISOString(),id);
+      return json(res,200,{success:true,...tipOverview(allocation.workDate)});
     }
     if (data.action === "details") {
       const current=requireOperationalAdmin(req),workDate=String(data.workDate||String(data.date).slice(0,10));
