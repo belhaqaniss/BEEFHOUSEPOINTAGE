@@ -25,6 +25,12 @@ const financialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
 if(!financialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
 const scheduleColumns=db.prepare("PRAGMA table_info(schedule_blocks)").all();
 if(!scheduleColumns.some(column=>column.name==="service")){db.exec("ALTER TABLE schedule_blocks ADD COLUMN service TEXT NOT NULL DEFAULT 'matin'");db.exec("UPDATE schedule_blocks SET service=CASE WHEN start_minutes>=1020 THEN 'soir' ELSE 'matin' END");}
+const attendanceColumns=db.prepare("PRAGMA table_info(attendance)").all();
+if(!attendanceColumns.some(column=>column.name==="service")){
+  db.exec("ALTER TABLE attendance ADD COLUMN service TEXT NOT NULL DEFAULT 'matin'");
+  const historical=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type FROM attendance ORDER BY employee_id,work_date,timestamp,id").all(),counts=new Map(),open=new Map(),update=db.prepare("UPDATE attendance SET service=? WHERE id=?");
+  for(const event of historical){const key=`${event.employeeId}:${event.workDate}`;if(event.type==="Arrivée"){const service=(counts.get(key)||0)>=1?"soir":"matin";counts.set(key,(counts.get(key)||0)+1);open.set(key,service);update.run(service,event.id);}else update.run(open.get(key)||"matin",event.id);}
+}
 
 const hashPassword = (password, salt) => scryptSync(password, salt, 64).toString("hex");
 db.prepare("INSERT OR IGNORE INTO restaurants(name,slug,address) VALUES(?,?,?)").run("BEEF HOUSE","beef-house","");
@@ -62,6 +68,8 @@ const requireHyperAdmin = req => { const admin=requireAdmin(req); if(admin.role!
 const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(!["admin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
 const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
 const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
+const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
+const nextPointageService=(employeeId,workDate,timestamp)=>{const scheduled=db.prepare("SELECT service,MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? GROUP BY service ORDER BY startMinutes").all(employeeId,workDate),arrived=new Set(db.prepare("SELECT service FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").all(employeeId,workDate).map(row=>row.service)),available=scheduled.filter(item=>!arrived.has(item.service));let selected;if(available.length===1)selected=available[0];else if(available.length>1){const now=parisMinutes(timestamp);selected=[...available].sort((a,b)=>Math.abs(a.startMinutes-now)-Math.abs(b.startMinutes-now))[0];}else{const count=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employeeId,workDate).value;selected={service:count>=1?"soir":"matin",startMinutes:null};}return {service:selected.service,scheduledStartMinutes:selected.startMinutes??null};};
 const tipOverview = workDate => {
   const day=db.prepare("SELECT work_date AS workDate,morning_cents/100.0 AS morningAmount,evening_cents/100.0 AS eveningAmount FROM tip_days WHERE work_date=?").get(workDate)||{workDate,morningAmount:0,eveningAmount:0};
   const allocations=db.prepare("SELECT id,work_date AS workDate,service,recipient_key AS recipientKey,recipient_name AS recipientName,amount_cents/100.0 AS amount,claimed,claimed_at AS claimedAt,(SELECT COALESCE(SUM(other.amount_cents),0)/100.0 FROM tip_allocations other WHERE other.recipient_key=tip_allocations.recipient_key AND other.claimed=0) AS accumulated FROM tip_allocations WHERE work_date=? ORDER BY service,recipient_name").all(workDate).map(row=>({...row,claimed:Boolean(row.claimed)}));
@@ -106,21 +114,19 @@ const server = createServer(async (req, res) => {
       requireOperationalAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
-      const lastEvent=db.prepare("SELECT type FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
+      const lastEvent=db.prepare("SELECT type,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
       if(String(data.mode)==="Arrivée"&&lastEvent?.type==="Arrivée") throw Object.assign(new Error("Cette personne a déjà pointé son arrivée. Enregistrez d’abord son départ."),{status:409});
       if(String(data.mode)==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
-      const arrivalCount=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employee.id,String(data.workDate)).value;
-      const shift=String(data.mode)==="Arrivée"&&arrivalCount>=1?"soir":"matin";
-      db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,signature) VALUES(?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),String(data.signature||""));
-      return json(res,200,{success:true,shift});
+      const planned=String(data.mode)==="Arrivée"?nextPointageService(employee.id,String(data.workDate),String(data.date)):{service:lastEvent?.service||"matin",scheduledStartMinutes:null};
+      db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),planned.service,String(data.signature||""));
+      return json(res,200,{success:true,shift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes});
     }
     if (data.action === "attendanceStatus") {
       requireOperationalAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
-      const lastEvent=db.prepare("SELECT type,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
-      const arrivalCount=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employee.id,String(data.workDate||new Date().toISOString().slice(0,10))).value;
-      return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",nextShift:arrivalCount>=1?"soir":"matin",lastEvent});
+      const lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null,workDate=String(data.workDate||new Date().toISOString().slice(0,10)),planned=lastEvent?.type==="Arrivée"?{service:lastEvent.service,scheduledStartMinutes:db.prepare("SELECT MIN(start_minutes) AS value FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,lastEvent.workDate,lastEvent.service).value}:nextPointageService(employee.id,workDate,new Date().toISOString());
+      return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",nextShift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes,lastEvent});
     }
     if (data.action === "tipOverview") {
       requireOperationalAdmin(req);
@@ -129,9 +135,9 @@ const server = createServer(async (req, res) => {
     if (data.action === "saveTips") {
       const current=requireOperationalAdmin(req),workDate=String(data.workDate||""),morningCents=Math.max(0,Math.round(Number(data.morningAmount||0)*100)),eveningCents=Math.max(0,Math.round(Number(data.eveningAmount||0)*100));
       if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isFinite(morningCents)||!Number.isFinite(eveningCents))throw new Error("Date ou montant de pourboire invalide");
-      const arrivals=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,a.timestamp FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? AND a.type='Arrivée' AND e.active=1 ORDER BY a.timestamp").all(workDate);
+      const arrivals=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,a.timestamp,a.service FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? AND a.type='Arrivée' AND e.active=1 ORDER BY a.timestamp").all(workDate);
       const recipients={matin:new Map(),soir:new Map()};
-      for(const arrival of arrivals){const service=parisHour(arrival.timestamp)<17?"matin":"soir",isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
+      for(const arrival of arrivals){const service=arrival.service||(parisHour(arrival.timestamp)<17?"matin":"soir"),isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
       const previous=db.prepare("SELECT service,recipient_key AS recipientKey,claimed,claimed_at AS claimedAt FROM tip_allocations WHERE work_date=?").all(workDate),status=new Map(previous.map(row=>[`${row.service}:${row.recipientKey}`,row]));
       db.exec("BEGIN");
       try{
@@ -167,24 +173,24 @@ const server = createServer(async (req, res) => {
       const entries=db.prepare("SELECT id,kind,label,amount_cents/100.0 AS amount,note FROM financial_entries WHERE entry_date=? AND source_detail=1 ORDER BY kind,id").all(workDate);
       return json(res,200,{success:true,detail,entries});
     }
-    if (data.action === "report") { requireOperationalAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
-    if (data.action === "exportAttendance") { requireAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "report") { requireOperationalAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "exportAttendance") { requireAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "monthlyHours") {
       requireSuperAdmin(req);
       const month=String(data.month||"");
       if(!/^\d{4}-\d{2}$/.test(month)) throw new Error("Mois invalide");
       const staff=db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
-      const events=db.prepare("SELECT a.employee_id AS employeeId,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date) AS scheduledStartMinutes FROM attendance a WHERE substr(a.work_date,1,7)=? ORDER BY a.employee_id,a.work_date,a.timestamp,a.id").all(month);
+      const events=db.prepare("SELECT a.employee_id AS employeeId,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes FROM attendance a WHERE substr(a.work_date,1,7)=? ORDER BY a.employee_id,a.work_date,a.timestamp,a.id").all(month);
       const employees=staff.map(employee=>{
-        const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map(),firstArrivalByDate=new Set();let totalMs=0,shifts=0;
+        const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map();let totalMs=0,shifts=0;
         for(const event of own){
           if(event.type==="Arrivée"){
             let start=new Date(event.timestamp);
-            if(!firstArrivalByDate.has(event.workDate)&&event.scheduledStartMinutes!==null){const planned=new Date(`${event.workDate}T00:00:00`);planned.setMinutes(Number(event.scheduledStartMinutes));if(start<planned)start=planned;}
-            firstArrivalByDate.add(event.workDate);openByDate.set(event.workDate,start);
+            if(event.scheduledStartMinutes!==null){const planned=new Date(`${event.workDate}T00:00:00`);planned.setMinutes(Number(event.scheduledStartMinutes));if(start<planned)start=planned;}
+            openByDate.set(`${event.workDate}:${event.service}`,start);
           } else {
-            const start=openByDate.get(event.workDate),end=new Date(event.timestamp);
-            if(start&&!Number.isNaN(end.getTime())){totalMs+=Math.max(0,end.getTime()-start.getTime());shifts++;openByDate.delete(event.workDate);}
+            const key=`${event.workDate}:${event.service}`,start=openByDate.get(key),end=new Date(event.timestamp);
+            if(start&&!Number.isNaN(end.getTime())){totalMs+=Math.max(0,end.getTime()-start.getTime());shifts++;openByDate.delete(key);}
           }
         }
         const totalMinutes=Math.round(totalMs/60000);

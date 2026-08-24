@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   type TEXT NOT NULL CHECK (type IN ('Arrivée', 'Départ')),
   timestamp TEXT NOT NULL,
   work_date TEXT NOT NULL,
+  service TEXT NOT NULL DEFAULT 'matin' CHECK (service IN ('matin', 'soir')),
   signature TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
