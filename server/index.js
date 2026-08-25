@@ -196,7 +196,7 @@ const server = createServer(async (req, res) => {
             openByDate.set(`${event.workDate}:${event.service}`,start);
           } else {
             const key=`${event.workDate}:${event.service}`,start=openByDate.get(key),end=new Date(event.timestamp);
-            if(start&&!Number.isNaN(end.getTime())){totalMs+=Math.max(0,end.getTime()-start.getTime());shifts++;openByDate.delete(key);}
+            if(start&&!Number.isNaN(end.getTime())){const day=24*60*60*1000,difference=end.getTime()-start.getTime();totalMs+=((difference%day)+day)%day;shifts++;openByDate.delete(key);}
           }
         }
         const totalMinutes=Math.round(totalMs/60000);

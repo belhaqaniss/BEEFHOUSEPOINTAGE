@@ -5,7 +5,7 @@ const xml=(value:string)=>value.replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 export const employeeSummary=(person:ExcelPerson,records:ExcelAttendance[],date:string)=>{
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts:{start?:Date;end?:Date}[]=[];
   for(const event of events){if(event.type==="Arrivée"){let start=new Date(event.timestamp);if(event.scheduledStartMinutes!=null){const planned=new Date(`${event.workDate}T00:00:00`);planned.setMinutes(event.scheduledStartMinutes);if(start<planned)start=planned}shifts.push({start})}else{const open=[...shifts].reverse().find(shift=>shift.start&&!shift.end);if(open)open.end=new Date(event.timestamp)}}
-  const duration=(shift?:{start?:Date;end?:Date})=>shift?.start&&shift.end?Math.max(0,(shift.end.getTime()-shift.start.getTime())/3600000):0,time=(value?:Date)=>value?value.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"",hours1=duration(shifts[0]),hours2=duration(shifts[1]);
+  const duration=(shift?:{start?:Date;end?:Date})=>{if(!shift?.start||!shift.end)return 0;const day=24*60*60*1000,difference=shift.end.getTime()-shift.start.getTime();return ((difference%day)+day)%day/3600000},time=(value?:Date)=>value?value.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"",hours1=duration(shifts[0]),hours2=duration(shifts[1]);
   return{name:`${person.first} ${person.last}`,start1:time(shifts[0]?.start),end1:time(shifts[0]?.end),hours1,start2:time(shifts[1]?.start),end2:time(shifts[1]?.end),hours2,total:hours1+hours2};
 };
 
