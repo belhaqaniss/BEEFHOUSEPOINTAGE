@@ -29,10 +29,11 @@ const menu=()=>({inline_keyboard:[
 
 const sendText=(chatId,text,replyMarkup)=>telegramCall("sendMessage",{chat_id:chatId,text,reply_markup:replyMarkup});
 
-const sendPhoto=async(chatId,png,caption)=>{
+const sendPhoto=async(chatId,png,caption,replyMarkup)=>{
   const form=new FormData();
   form.set("chat_id",String(chatId));
   form.set("caption",caption);
+  if(replyMarkup)form.set("reply_markup",JSON.stringify(replyMarkup));
   form.set("photo",new Blob([png],{type:"image/png"}),"planning.png");
   const response=await fetch(apiUrl("sendPhoto"),{method:"POST",body:form});
   const result=await response.json();
@@ -63,8 +64,7 @@ const handleCommand=async(db,chatId,input)=>{
   if(command.type==="planning"){
     const label=command.group==="cuisine"?"Cuisine":"Salle";
     const png=await renderPlanningPng(db,command.weekStart,command.group);
-    await sendPhoto(chatId,png,`Planning ${label} · semaine du ${command.weekStart.split("-").reverse().join("/")}`);
-    return sendText(chatId,"Que souhaitez-vous faire ?",menu());
+    return sendPhoto(chatId,png,`Planning ${label} · semaine du ${command.weekStart.split("-").reverse().join("/")}`,menu());
   }
   const expires=new Date(Date.now()+10*60*1000).toISOString();
   db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(owner,command.action,JSON.stringify(command),expires);
