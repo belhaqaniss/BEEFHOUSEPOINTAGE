@@ -1,4 +1,5 @@
 import { applyAction, commandHelp, description, parseWhatsAppCommand, renderPlanningPng } from "./whatsapp.js";
+import { buildDailyDetailsPdf, buildDailyHoursPdf, previousParisDate } from "./reports.js";
 
 const apiUrl=method=>`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`;
 const admins=()=>new Set(String(process.env.TELEGRAM_ADMIN_IDS||"").split(",").map(value=>value.trim()).filter(Boolean));
@@ -24,6 +25,7 @@ const menu=()=>({inline_keyboard:[
   [{text:"📋 Planning Salle",callback_data:"planning_salle"},{text:"👨‍🍳 Planning Cuisine",callback_data:"planning_cuisine"}],
   [{text:`🗓 Salle semaine prochaine · ${nextWeekLabel()}`,callback_data:"planning_salle_next"}],
   [{text:`🗓 Cuisine semaine prochaine · ${nextWeekLabel()}`,callback_data:"planning_cuisine_next"}],
+  [{text:"📄 Détail journalier (hier)",callback_data:"daily_details_yesterday"},{text:"⏱ Heures employés (hier)",callback_data:"hours_yesterday"}],
   [{text:"❓ Aide",callback_data:"show_help"}]
 ]});
 
@@ -40,6 +42,12 @@ const sendPhoto=async(chatId,png,caption,replyMarkup)=>{
   if(!response.ok||!result.ok)throw new Error(`Telegram sendPhoto refusé: ${result.description||response.status}`);
 };
 
+const sendDocument=async(chatId,document,filename,caption,replyMarkup)=>{
+  const form=new FormData();form.set("chat_id",String(chatId));form.set("caption",caption);form.set("document",new Blob([document],{type:"application/pdf"}),filename);if(replyMarkup)form.set("reply_markup",JSON.stringify(replyMarkup));
+  const response=await fetch(apiUrl("sendDocument"),{method:"POST",body:form}),result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(`Telegram sendDocument refusé: ${result.description||response.status}`);
+};
+
 const handleCommand=async(db,chatId,input)=>{
   const owner=`telegram:${chatId}`;
   if(!admins().has(String(chatId))){
@@ -47,6 +55,17 @@ const handleCommand=async(db,chatId,input)=>{
     return;
   }
   db.prepare("DELETE FROM whatsapp_pending_actions WHERE expires_at<=?").run(new Date().toISOString());
+  const reportDate=previousParisDate();
+  if(input==="daily_details_yesterday"){
+    const detail=db.prepare("SELECT work_date AS workDate,cashier_morning AS cashierMorning,cashier_evening AS cashierEvening,fdc_morning AS fdcMorning,fdc_evening AS fdcEvening,fdc_final AS fdcFinal,cb_amount AS cbAmount,cash_amount AS cashAmount,total_amount AS totalAmount FROM daily_details WHERE work_date=? ORDER BY id DESC LIMIT 1").get(reportDate);
+    if(!detail)return sendText(chatId,`Aucun détail journalier enregistré pour le ${reportDate.split("-").reverse().join("/")}.`,menu());
+    const entries=db.prepare("SELECT kind,label,amount_cents/100.0 AS amount,note FROM financial_entries WHERE entry_date=? AND source_detail=1 ORDER BY kind,id").all(reportDate),pdf=buildDailyDetailsPdf(detail,entries);
+    return sendDocument(chatId,pdf,`detail-journalier-${reportDate}.pdf`,`Détail journalier du ${reportDate.split("-").reverse().join("/")}`,menu());
+  }
+  if(input==="hours_yesterday"){
+    const people=db.prepare("SELECT first_name AS first,last_name AS last,role FROM employees WHERE active=1 ORDER BY first_name,last_name").all(),records=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(reportDate),pdf=buildDailyHoursPdf(reportDate,people,records);
+    return sendDocument(chatId,pdf,`heures-employes-${reportDate}.pdf`,`Heures des employés du ${reportDate.split("-").reverse().join("/")}`,menu());
+  }
   const command=parseWhatsAppCommand(db,input);
   if(command.type==="help")return sendText(chatId,`${commandHelp()}\n\nVous pouvez aussi utiliser les boutons ci-dessous.`,menu());
   if(command.type==="error")return sendText(chatId,command.message,menu());
@@ -82,7 +101,7 @@ export const createTelegramHandler=({db,json})=>async(req,res)=>{
   const message=update.message;
   const chatId=callback?.message?.chat?.id??message?.chat?.id;
   if(!chatId)return;
-  const commands={planning_salle:"planning salle",planning_cuisine:"planning cuisine",planning_salle_next:"planning salle semaine prochaine",planning_cuisine_next:"planning cuisine semaine prochaine",show_help:"aide",confirm_action:"confirmer",cancel_action:"annuler"};
+  const commands={planning_salle:"planning salle",planning_cuisine:"planning cuisine",planning_salle_next:"planning salle semaine prochaine",planning_cuisine_next:"planning cuisine semaine prochaine",daily_details_yesterday:"daily_details_yesterday",hours_yesterday:"hours_yesterday",show_help:"aide",confirm_action:"confirmer",cancel_action:"annuler"};
   if(callback?.id)telegramCall("answerCallbackQuery",{callback_query_id:callback.id}).catch(console.error);
   const text=commands[callback?.data]||message?.text;
   if(!text)return;
