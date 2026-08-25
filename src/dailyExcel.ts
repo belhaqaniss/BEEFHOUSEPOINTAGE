@@ -2,7 +2,7 @@ export type ExcelPerson={first:string;last:string;role?:string};
 export type ExcelAttendance={name:string;type:"Arrivée"|"Départ";timestamp:string;workDate:string;scheduledStartMinutes?:number|null};
 
 const xml=(value:string)=>value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-const parisHour=(value:Date)=>Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(value));
+const parisHour=(value:Date)=>Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).formatToParts(value).find(part=>part.type==="hour")?.value||0);
 export const employeeSummary=(person:ExcelPerson,records:ExcelAttendance[],date:string)=>{
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts:{start?:Date;end?:Date;period:"matin"|"soir"}[]=[];
   for(const event of events){if(event.type==="Arrivée"){const arrival=new Date(event.timestamp),period=parisHour(arrival)>=15?"soir":"matin";let start=arrival;if(event.scheduledStartMinutes!=null){const planned=new Date(`${event.workDate}T00:00:00`);planned.setMinutes(event.scheduledStartMinutes);if(start<planned)start=planned}shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>shift.start&&!shift.end);if(open)open.end=new Date(event.timestamp)}}
