@@ -212,6 +212,17 @@ const server = createServer(async (req, res) => {
       if(!result.changes) throw Object.assign(new Error("Pointage introuvable"),{status:404});
       return json(res,200,{success:true});
     }
+    if (data.action === "addManualDeparture") {
+      const current=requireOperationalAdmin(req),arrivalId=Number(data.arrivalId),timestamp=String(data.timestamp||""),parsed=new Date(timestamp);
+      if(!Number.isInteger(arrivalId)||Number.isNaN(parsed.getTime())) throw new Error("Heure de départ invalide");
+      const arrival=db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,service,timestamp FROM attendance WHERE id=? AND type='Arrivée'").get(arrivalId);
+      if(!arrival) throw Object.assign(new Error("Arrivée introuvable"),{status:404});
+      if(parsed.getTime()<=new Date(arrival.timestamp).getTime()) throw new Error("Le départ doit être postérieur à l’arrivée");
+      const existing=db.prepare("SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND service=? AND type='Départ' AND timestamp>=? ORDER BY timestamp LIMIT 1").get(arrival.employeeId,arrival.workDate,arrival.service,arrival.timestamp);
+      if(existing) throw Object.assign(new Error("Un départ existe déjà pour ce service"),{status:409});
+      const result=db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,'Départ',?,?,?,?)").run(arrival.employeeId,parsed.toISOString(),arrival.workDate,arrival.service,`Saisie manuelle par ${current.username}`);
+      return json(res,200,{success:true,id:Number(result.lastInsertRowid)});
+    }
     if (data.action === "deleteAttendancePair") {
       requireOperationalAdmin(req);
       const ids=Array.isArray(data.ids)?data.ids.map(Number).filter(Number.isInteger):[];
