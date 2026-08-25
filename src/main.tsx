@@ -6,6 +6,7 @@ import "./team.css";
 import "./branding.css";
 import "./superadmin.css";
 import "./daily-details.css";
+import "./admin-tabs.css";
 import "./mobile.css";
 
 createRoot(document.getElementById("root")!).render(
