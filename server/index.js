@@ -143,7 +143,7 @@ const server = createServer(async (req, res) => {
       if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isFinite(morningCents)||!Number.isFinite(eveningCents))throw new Error("Date ou montant de pourboire invalide");
       const arrivals=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,a.timestamp,a.service FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? AND a.type='Arrivée' AND e.active=1 ORDER BY a.timestamp").all(workDate);
       const recipients={matin:new Map(),soir:new Map()};
-      for(const arrival of arrivals){const service=arrival.service||(parisHour(arrival.timestamp)<17?"matin":"soir"),isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
+      for(const arrival of arrivals){const service=parisMinutes(arrival.timestamp)<15*60?"matin":"soir",isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
       const previous=db.prepare("SELECT service,recipient_key AS recipientKey,claimed,claimed_at AS claimedAt FROM tip_allocations WHERE work_date=?").all(workDate),status=new Map(previous.map(row=>[`${row.service}:${row.recipientKey}`,row]));
       db.exec("BEGIN");
       try{
