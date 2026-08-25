@@ -11,6 +11,7 @@
     "dev:web": "vite",
     "dev:api": "node server/index.js",
     "test:whatsapp": "node --test server/whatsapp.test.js",
+    "test:telegram": "node --test server/telegram.test.js",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },

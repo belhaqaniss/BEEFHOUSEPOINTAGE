@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "node:process";
 import { createWhatsAppHandler } from "./whatsapp.js";
+import { createTelegramHandler } from "./telegram.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const envFile = join(root, "..", ".env");
@@ -80,12 +81,14 @@ const tipOverview = workDate => {
   return {day,allocations};
 };
 const whatsapp = createWhatsAppHandler({ db, json });
+const telegram = createTelegramHandler({ db, json });
 
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, {});
   const url = new URL(req.url, "http://server.internal");
   if (url.pathname === "/api/health") return json(res, 200, { success:true, database:"sqlite" });
   if (url.pathname === "/api/whatsapp/webhook") return whatsapp(req,res,url);
+  if (url.pathname === "/api/telegram/webhook") return telegram(req,res,url);
   if (url.pathname !== "/api" && url.pathname !== "/") return json(res, 404, { success:false, message:"Route introuvable" });
   try {
     if (req.method === "GET" && (url.searchParams.get("action") || "employees") === "employees") return json(res, 200, employees());

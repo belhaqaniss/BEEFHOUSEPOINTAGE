@@ -58,7 +58,7 @@ const resolveDate=(text,weekOffset=0)=>{
   const today=parisToday(),week=mondayOf(today);let date=addDays(week,entry[1]+weekOffset*7);if(weekOffset===0&&date<today)date=addDays(date,7);return iso(date);
 };
 
-const commandHelp=()=>[
+export const commandHelp=()=>[
   "Commandes des plannings BEEF HOUSE :",
   "• planning salle",
   "• planning salle semaine prochaine",
@@ -90,9 +90,9 @@ export const parseWhatsAppCommand=(db,input)=>{
   return {type:"pending",action:"set",group,employeeId:employee.id,employeeName:`${employee.first} ${employee.last}`,workDate,service,startMinutes,endMinutes,closing};
 };
 
-const description=action=>action.action==="delete"?`SUPPRIMER ${action.employeeName}\n${action.workDate} · ${action.service}`:`ENREGISTRER ${action.employeeName}\n${action.workDate} · ${action.service}\n${timeLabel(action.startMinutes)} — ${action.closing?"FERMETURE":timeLabel(action.endMinutes)}`;
+export const description=action=>action.action==="delete"?`SUPPRIMER ${action.employeeName}\n${action.workDate} · ${action.service}`:`ENREGISTRER ${action.employeeName}\n${action.workDate} · ${action.service}\n${timeLabel(action.startMinutes)} — ${action.closing?"FERMETURE":timeLabel(action.endMinutes)}`;
 
-const applyAction=(db,phone,action)=>{
+export const applyAction=(db,phone,action)=>{
   const createdBy=db.prepare("SELECT id FROM admins WHERE role='superadmin' ORDER BY id LIMIT 1").get()?.id||null;
   db.exec("BEGIN");try{
     db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").run(action.employeeId,action.workDate,action.service);
