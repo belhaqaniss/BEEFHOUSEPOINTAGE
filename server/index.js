@@ -192,7 +192,7 @@ const server = createServer(async (req, res) => {
         for(const event of own){
           if(event.type==="Arrivée"){
             let start=new Date(event.timestamp);
-            const actualMinutes=parisMinutes(event.timestamp),scheduled=parisHour(event.timestamp)>=15?event.scheduledEveningStartMinutes:event.scheduledMorningStartMinutes;if(scheduled!==null&&actualMinutes<scheduled)start=new Date(start.getTime()+(Number(scheduled)-actualMinutes)*60000);
+            const actualMinutes=parisMinutes(event.timestamp),scheduled=parisHour(event.timestamp)>=15?event.scheduledEveningStartMinutes:event.scheduledMorningStartMinutes,earlyMinutes=scheduled===null?0:Number(scheduled)-actualMinutes;if(earlyMinutes>0&&earlyMinutes<=15)start=new Date(start.getTime()+earlyMinutes*60000);
             openByDate.set(`${event.workDate}:${event.service}`,start);
           } else {
             const key=`${event.workDate}:${event.service}`,start=openByDate.get(key),end=new Date(event.timestamp);
