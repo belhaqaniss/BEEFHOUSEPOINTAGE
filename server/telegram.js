@@ -10,12 +10,22 @@ const telegramCall=async(method,payload)=>{
   return result.result;
 };
 
-const menu={inline_keyboard:[
+const nextWeekLabel=()=>{
+  const todayParts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+  const part=type=>todayParts.find(item=>item.type===type)?.value;
+  const today=new Date(`${part("year")}-${part("month")}-${part("day")}T12:00:00Z`);
+  const monday=new Date(today);monday.setUTCDate(monday.getUTCDate()-((monday.getUTCDay()+6)%7)+7);
+  const sunday=new Date(monday);sunday.setUTCDate(sunday.getUTCDate()+6);
+  const label=date=>`${String(date.getUTCDate()).padStart(2,"0")}/${String(date.getUTCMonth()+1).padStart(2,"0")}`;
+  return `${label(monday)}–${label(sunday)}`;
+};
+
+const menu=()=>({inline_keyboard:[
   [{text:"📋 Planning Salle",callback_data:"planning_salle"},{text:"👨‍🍳 Planning Cuisine",callback_data:"planning_cuisine"}],
-  [{text:"🗓 Salle semaine prochaine",callback_data:"planning_salle_next"}],
-  [{text:"🗓 Cuisine semaine prochaine",callback_data:"planning_cuisine_next"}],
+  [{text:`🗓 Salle semaine prochaine · ${nextWeekLabel()}`,callback_data:"planning_salle_next"}],
+  [{text:`🗓 Cuisine semaine prochaine · ${nextWeekLabel()}`,callback_data:"planning_cuisine_next"}],
   [{text:"❓ Aide",callback_data:"show_help"}]
-]};
+]});
 
 const sendText=(chatId,text,replyMarkup)=>telegramCall("sendMessage",{chat_id:chatId,text,reply_markup:replyMarkup});
 
@@ -37,24 +47,24 @@ const handleCommand=async(db,chatId,input)=>{
   }
   db.prepare("DELETE FROM whatsapp_pending_actions WHERE expires_at<=?").run(new Date().toISOString());
   const command=parseWhatsAppCommand(db,input);
-  if(command.type==="help")return sendText(chatId,`${commandHelp()}\n\nVous pouvez aussi utiliser les boutons ci-dessous.`,menu);
-  if(command.type==="error")return sendText(chatId,command.message,menu);
+  if(command.type==="help")return sendText(chatId,`${commandHelp()}\n\nVous pouvez aussi utiliser les boutons ci-dessous.`,menu());
+  if(command.type==="error")return sendText(chatId,command.message,menu());
   if(command.type==="cancel"){
     db.prepare("DELETE FROM whatsapp_pending_actions WHERE phone_number=?").run(owner);
-    return sendText(chatId,"Modification annulée.",menu);
+    return sendText(chatId,"Modification annulée.",menu());
   }
   if(command.type==="confirm"){
     const pending=db.prepare("SELECT payload FROM whatsapp_pending_actions WHERE phone_number=? AND expires_at>?").get(owner,new Date().toISOString());
-    if(!pending)return sendText(chatId,"Aucune modification en attente.",menu);
+    if(!pending)return sendText(chatId,"Aucune modification en attente.",menu());
     const action=JSON.parse(pending.payload);
     applyAction(db,owner,action);
-    return sendText(chatId,`✅ Planning ${action.group==="cuisine"?"Cuisine":"Salle"} mis à jour.\n\n${description(action)}`,menu);
+    return sendText(chatId,`✅ Planning ${action.group==="cuisine"?"Cuisine":"Salle"} mis à jour.\n\n${description(action)}`,menu());
   }
   if(command.type==="planning"){
     const label=command.group==="cuisine"?"Cuisine":"Salle";
     const png=await renderPlanningPng(db,command.weekStart,command.group);
     await sendPhoto(chatId,png,`Planning ${label} · semaine du ${command.weekStart.split("-").reverse().join("/")}`);
-    return sendText(chatId,"Que souhaitez-vous faire ?",menu);
+    return sendText(chatId,"Que souhaitez-vous faire ?",menu());
   }
   const expires=new Date(Date.now()+10*60*1000).toISOString();
   db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(owner,command.action,JSON.stringify(command),expires);
