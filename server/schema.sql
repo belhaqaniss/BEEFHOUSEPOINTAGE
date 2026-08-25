@@ -142,3 +142,25 @@ CREATE TABLE IF NOT EXISTS tip_allocations (
 
 CREATE INDEX IF NOT EXISTS idx_tip_allocations_recipient
 ON tip_allocations(recipient_key, claimed, work_date);
+
+CREATE TABLE IF NOT EXISTS whatsapp_pending_actions (
+  phone_number TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS whatsapp_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone_number TEXT NOT NULL,
+  action TEXT NOT NULL,
+  employee_id INTEGER REFERENCES employees(id),
+  work_date TEXT,
+  service TEXT,
+  details TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_audit_date
+ON whatsapp_audit_log(work_date, phone_number);

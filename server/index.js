@@ -1,11 +1,15 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvFile } from "node:process";
+import { createWhatsAppHandler } from "./whatsapp.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const envFile = join(root, "..", ".env");
+if (existsSync(envFile)) loadEnvFile(envFile);
 const dataDir = join(root, "data");
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, "presence.sqlite"));
@@ -75,11 +79,13 @@ const tipOverview = workDate => {
   const allocations=db.prepare("SELECT id,work_date AS workDate,service,recipient_key AS recipientKey,recipient_name AS recipientName,amount_cents/100.0 AS amount,claimed,claimed_at AS claimedAt,(SELECT COALESCE(SUM(other.amount_cents),0)/100.0 FROM tip_allocations other WHERE other.recipient_key=tip_allocations.recipient_key AND other.claimed=0) AS accumulated FROM tip_allocations WHERE work_date=? ORDER BY service,recipient_name").all(workDate).map(row=>({...row,claimed:Boolean(row.claimed)}));
   return {day,allocations};
 };
+const whatsapp = createWhatsAppHandler({ db, json });
 
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, {});
   const url = new URL(req.url, "http://server.internal");
   if (url.pathname === "/api/health") return json(res, 200, { success:true, database:"sqlite" });
+  if (url.pathname === "/api/whatsapp/webhook") return whatsapp(req,res,url);
   if (url.pathname !== "/api" && url.pathname !== "/") return json(res, 404, { success:false, message:"Route introuvable" });
   try {
     if (req.method === "GET" && (url.searchParams.get("action") || "employees") === "employees") return json(res, 200, employees());
