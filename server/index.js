@@ -266,6 +266,16 @@ const server = createServer(async (req, res) => {
       db.prepare("INSERT INTO admins(username,password_hash,password_salt,role) VALUES(?,?,?,?)").run(username,hashPassword(password,salt),salt,data.role==="superadmin"?"superadmin":"admin");
       return json(res,200,{success:true});
     }
+    if (data.action === "updateEmployeeIdentity") {
+      requireSuperAdmin(req);
+      const id=Number(data.id),first=String(data.first||"").trim(),last=String(data.last||"").trim();
+      if(!Number.isInteger(id)||!first||!last)throw new Error("Prénom et nom obligatoires");
+      const existing=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND id<>?").get(first,last,id);
+      if(existing)throw Object.assign(new Error("Un employé porte déjà ce prénom et ce nom"),{status:409});
+      const result=db.prepare("UPDATE employees SET first_name=?,last_name=? WHERE id=?").run(first,last,id);
+      if(!result.changes)throw Object.assign(new Error("Employé introuvable"),{status:404});
+      return json(res,200,{success:true});
+    }
     if (data.action === "deleteAdmin") {
       const current=requireSuperAdmin(req),target=Number(data.id);
       if(current.id===target) throw new Error("Vous ne pouvez pas supprimer votre propre compte");
