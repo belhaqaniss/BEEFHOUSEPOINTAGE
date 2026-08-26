@@ -327,6 +327,14 @@ const server = createServer(async (req, res) => {
       } catch(error) { db.exec("ROLLBACK"); throw error; }
       return json(res,200,{success:true});
     }
+    if (data.action === "setScheduleBlockRange") {
+      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),first=Number(data.startMinutes),last=Number(data.endMinutes),startMinutes=Math.min(first,last),endMinutes=Math.max(first,last);
+      if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||startMinutes<420||endMinutes>1530||startMinutes%30||endMinutes%30)throw new Error("Plage de planning invalide");
+      const values=[];for(let minutes=startMinutes;minutes<=endMinutes;minutes+=30)values.push(minutes);
+      const existing=new Set(db.prepare("SELECT start_minutes AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes BETWEEN ? AND ?").all(employeeId,workDate,startMinutes,endMinutes).map(row=>row.startMinutes)),remove=values.every(minutes=>existing.has(minutes));
+      db.exec("BEGIN");try{if(remove)db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes BETWEEN ? AND ?").run(employeeId,workDate,startMinutes,endMinutes);else{const insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?) ON CONFLICT(employee_id,work_date,start_minutes) DO UPDATE SET service=excluded.service,created_by=excluded.created_by");for(const minutes of values)insert.run(employeeId,workDate,minutes,minutes>=1020?"soir":"matin",current.id)}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      return json(res,200,{success:true,removed:remove});
+    }
     return json(res,400,{success:false,message:"Action inconnue"});
   } catch (error) { return json(res,error.status||400,{success:false,message:error.message||"Erreur serveur"}); }
 });
