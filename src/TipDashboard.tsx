@@ -4,7 +4,7 @@ import "./tips.css";
 
 type Allocation={id:number;service:"matin"|"soir";recipientKey:string;recipientName:string;amount:number;claimed:boolean;accumulated:number};
 type TipResult={day:{workDate:string;morningAmount:number;eveningAmount:number};allocations:Allocation[]};
-const request=async(payload:object)=>{const token=sessionStorage.getItem("presence-token"),response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token||""}`},body:JSON.stringify(payload)}),raw=await response.text();let result;try{result=JSON.parse(raw)}catch{throw new Error("Réponse invalide du serveur")};if(!response.ok||!result.success)throw new Error(result.message||"Erreur serveur");return result as TipResult&{success:true}};
+const request=async(payload:object)=>{const token=localStorage.getItem("presence-token")||sessionStorage.getItem("presence-token"),response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token||""}`},body:JSON.stringify(payload)}),raw=await response.text();let result;try{result=JSON.parse(raw)}catch{throw new Error("Réponse invalide du serveur")};if(!response.ok||!result.success)throw new Error(result.message||"Erreur serveur");return result as TipResult&{success:true}};
 const today=()=>new Date().toLocaleDateString("en-CA");
 const euro=(amount:number)=>amount.toLocaleString("fr-FR",{style:"currency",currency:"EUR"});
 

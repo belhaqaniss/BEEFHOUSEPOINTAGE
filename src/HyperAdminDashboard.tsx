@@ -6,7 +6,7 @@ import "./hyperadmin-theme.css";
 
 type Restaurant={id:number;name:string;slug:string;address:string;active:number;createdAt:string;administrators:number};
 type HyperData={stats:{restaurants:number;activeRestaurants:number;administrators:number;employees:number};restaurants:Restaurant[]};
-const request=async(payload:object)=>{const token=sessionStorage.getItem("presence-token"),response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token||""}`},body:JSON.stringify(payload)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result.success===false)throw new Error(result.message||"Erreur serveur");return result};
+const request=async(payload:object)=>{const token=localStorage.getItem("presence-token")||sessionStorage.getItem("presence-token"),response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token||""}`},body:JSON.stringify(payload)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result.success===false)throw new Error(result.message||"Erreur serveur");return result};
 
 export default function HyperAdminDashboard(){
  const[section,setSection]=useState<"restaurants"|"operations">("restaurants"),[data,setData]=useState<HyperData|null>(null),[error,setError]=useState(""),[busy,setBusy]=useState(false);

@@ -21,7 +21,7 @@ type DashboardData = {
 };
 
 const request = async (payload:object):Promise<any> => {
-  const token=sessionStorage.getItem("presence-token");
+  const token=localStorage.getItem("presence-token")||sessionStorage.getItem("presence-token");
   const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token||""}`},body:JSON.stringify(payload)});
   const raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}
   if(!response.ok||result.success===false) throw new Error(result.message||"Erreur serveur");

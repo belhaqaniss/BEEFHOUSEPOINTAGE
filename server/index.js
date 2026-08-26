@@ -62,9 +62,10 @@ const body = async req => { const chunks=[]; let size=0; for await (const chunk 
 const adminFromRequest = req => {
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  const now=new Date().toISOString(),admin=db.prepare("SELECT admins.id,admins.username,admins.role,admins.restaurant_id AS restaurantId FROM sessions JOIN admins ON admins.id=sessions.admin_id WHERE token=? AND expires_at>?").get(token,now);
-  if(admin)return admin;
-  const hyper=db.prepare("SELECT hyper_admins.id,hyper_admins.username FROM hyper_sessions JOIN hyper_admins ON hyper_admins.id=hyper_sessions.hyper_admin_id WHERE token=? AND expires_at>?").get(token,now);
+  const admin=db.prepare("SELECT admins.id,admins.username,admins.role,admins.restaurant_id AS restaurantId FROM sessions JOIN admins ON admins.id=sessions.admin_id WHERE token=?").get(token);
+  if(admin){db.prepare("UPDATE sessions SET expires_at=? WHERE token=?").run(new Date(Date.now()+365*24*60*60*1000).toISOString(),token);return admin;}
+  const hyper=db.prepare("SELECT hyper_admins.id,hyper_admins.username FROM hyper_sessions JOIN hyper_admins ON hyper_admins.id=hyper_sessions.hyper_admin_id WHERE token=?").get(token);
+  if(hyper)db.prepare("UPDATE hyper_sessions SET expires_at=? WHERE token=?").run(new Date(Date.now()+365*24*60*60*1000).toISOString(),token);
   return hyper?{...hyper,role:"hyperadmin",restaurantId:null}:null;
 };
 const requireAdmin = req => { const admin=adminFromRequest(req); if(!admin) throw Object.assign(new Error("Session administrateur requise"),{status:401}); return admin; };
@@ -96,15 +97,15 @@ const server = createServer(async (req, res) => {
     const data = await body(req);
     if (data.action === "login") {
       const admin=db.prepare("SELECT * FROM admins WHERE username=?").get(String(data.username||""));
-      if(!admin){const hyper=db.prepare("SELECT * FROM hyper_admins WHERE username=?").get(String(data.username||""));if(!hyper)throw Object.assign(new Error("Identifiants incorrects"),{status:401});const given=Buffer.from(hashPassword(String(data.password||""),hyper.password_salt),"hex"),expected=Buffer.from(hyper.password_hash,"hex");if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("Identifiants incorrects"),{status:401});const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+8*60*60*1000).toISOString();db.prepare("DELETE FROM hyper_sessions WHERE expires_at<=?").run(new Date().toISOString());db.prepare("INSERT INTO hyper_sessions(token,hyper_admin_id,expires_at) VALUES(?,?,?)").run(token,hyper.id,expires);return json(res,200,{success:true,token,expiresAt:expires,username:hyper.username,role:"hyperadmin"});}
+      if(!admin){const hyper=db.prepare("SELECT * FROM hyper_admins WHERE username=?").get(String(data.username||""));if(!hyper)throw Object.assign(new Error("Identifiants incorrects"),{status:401});const given=Buffer.from(hashPassword(String(data.password||""),hyper.password_salt),"hex"),expected=Buffer.from(hyper.password_hash,"hex");if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("Identifiants incorrects"),{status:401});const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+365*24*60*60*1000).toISOString();db.prepare("INSERT INTO hyper_sessions(token,hyper_admin_id,expires_at) VALUES(?,?,?)").run(token,hyper.id,expires);return json(res,200,{success:true,token,expiresAt:expires,username:hyper.username,role:"hyperadmin"});}
       const given=Buffer.from(hashPassword(String(data.password||""),admin.password_salt),"hex"),expected=Buffer.from(admin.password_hash,"hex");
       if(given.length!==expected.length||!timingSafeEqual(given,expected)) throw Object.assign(new Error("Identifiants incorrects"),{status:401});
-      const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+8*60*60*1000).toISOString();
-      db.prepare("DELETE FROM sessions WHERE expires_at<=?").run(new Date().toISOString());
+      const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+365*24*60*60*1000).toISOString();
       db.prepare("INSERT INTO sessions(token,admin_id,expires_at) VALUES(?,?,?)").run(token,admin.id,expires);
       return json(res,200,{success:true,token,expiresAt:expires,username:admin.username,role:admin.role});
     }
     if (data.action === "logout") { const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""); if(token){db.prepare("DELETE FROM sessions WHERE token=?").run(token);db.prepare("DELETE FROM hyper_sessions WHERE token=?").run(token);} return json(res,200,{success:true}); }
+    if (data.action === "session") { const current=requireAdmin(req); return json(res,200,{success:true,username:current.username,role:current.role,restaurantId:current.restaurantId}); }
     if (data.action === "hyperDashboard") {
       requireHyperAdmin(req);
       const restaurants=db.prepare("SELECT r.id,r.name,r.slug,r.address,r.active,r.created_at AS createdAt,COUNT(DISTINCT a.id) AS administrators FROM restaurants r LEFT JOIN admins a ON a.restaurant_id=r.id GROUP BY r.id ORDER BY r.active DESC,r.name").all();
