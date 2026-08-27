@@ -124,11 +124,12 @@ const server = createServer(async (req, res) => {
       requireOperationalAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
-      const lastEvent=db.prepare("SELECT type,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
+      const lastEvent=db.prepare("SELECT type,service,work_date AS workDate FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
       if(String(data.mode)==="Arrivée"&&lastEvent?.type==="Arrivée") throw Object.assign(new Error("Cette personne a déjà pointé son arrivée. Enregistrez d’abord son départ."),{status:409});
       if(String(data.mode)==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
       const planned=String(data.mode)==="Arrivée"?nextPointageService(employee.id,String(data.workDate),String(data.date)):{service:lastEvent?.service||"matin",scheduledStartMinutes:null};
-      db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),String(data.workDate),planned.service,String(data.signature||""));
+      const effectiveWorkDate=String(data.mode)==="Départ"?String(lastEvent.workDate):String(data.workDate);
+      db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,String(data.mode),String(data.date),effectiveWorkDate,planned.service,String(data.signature||""));
       return json(res,200,{success:true,shift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes});
     }
     if (data.action === "attendanceStatus") {
