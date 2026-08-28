@@ -164,3 +164,17 @@ CREATE TABLE IF NOT EXISTS whatsapp_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_whatsapp_audit_date
 ON whatsapp_audit_log(work_date, phone_number);
+
+CREATE TABLE IF NOT EXISTS order_splits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_date TEXT NOT NULL,
+  table_label TEXT NOT NULL DEFAULT '',
+  total_cents INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+  payload TEXT NOT NULL DEFAULT '[]',
+  created_by INTEGER REFERENCES admins(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_splits_date
+ON order_splits(work_date, updated_at);

@@ -184,6 +184,22 @@ const server = createServer(async (req, res) => {
       const entries=db.prepare("SELECT id,kind,label,amount_cents/100.0 AS amount,note FROM financial_entries WHERE entry_date=? AND source_detail=1 ORDER BY kind,id").all(workDate);
       return json(res,200,{success:true,detail,entries});
     }
+    if (data.action === "orderSplits") {
+      requireOperationalAdmin(req);const workDate=String(data.workDate||"");
+      const orders=db.prepare("SELECT id,work_date AS workDate,table_label AS tableLabel,total_cents/100.0 AS total,payload,created_at AS createdAt,updated_at AS updatedAt FROM order_splits WHERE work_date=? ORDER BY updated_at DESC,id DESC").all(workDate).map(row=>({...row,people:JSON.parse(row.payload||"[]")}));
+      return json(res,200,{success:true,orders});
+    }
+    if (data.action === "saveOrderSplit") {
+      const current=requireOperationalAdmin(req),id=Number(data.id||0),workDate=String(data.workDate||""),tableLabel=String(data.tableLabel||"").trim(),total=Number(data.total),people=Array.isArray(data.people)?data.people:[];
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isFinite(total)||total<0)throw new Error("Date ou total de commande invalide");
+      const cleaned=people.map(person=>({id:String(person.id||randomBytes(6).toString("hex")),name:String(person.name||"").trim()||"Client",paymentMethod:person.paymentMethod==="CB"?"CB":"ESP",paid:Boolean(person.paid),items:(Array.isArray(person.items)?person.items:[]).map(item=>({name:String(item.name||"").trim(),price:Math.max(0,Number(item.price)||0),quantity:Math.max(1,Math.floor(Number(item.quantity)||1))})).filter(item=>item.name)}));
+      const payload=JSON.stringify(cleaned),totalCents=Math.round(total*100);
+      if(id){const result=db.prepare("UPDATE order_splits SET work_date=?,table_label=?,total_cents=?,payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(workDate,tableLabel,totalCents,payload,id);if(!result.changes)throw Object.assign(new Error("Séparation introuvable"),{status:404});return json(res,200,{success:true,id});}
+      const result=db.prepare("INSERT INTO order_splits(work_date,table_label,total_cents,payload,created_by) VALUES(?,?,?,?,?)").run(workDate,tableLabel,totalCents,payload,current.id);return json(res,200,{success:true,id:Number(result.lastInsertRowid)});
+    }
+    if (data.action === "deleteOrderSplit") {
+      requireOperationalAdmin(req);db.prepare("DELETE FROM order_splits WHERE id=?").run(Number(data.id));return json(res,200,{success:true});
+    }
     if (data.action === "report") { requireOperationalAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "exportAttendance") { requireAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "monthlyHours") {
