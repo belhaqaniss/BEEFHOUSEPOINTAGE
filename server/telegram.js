@@ -1,4 +1,4 @@
-import { applyAction, commandHelp, description, parseWhatsAppCommand, renderPlanningPng } from "./whatsapp.js";
+import { applyAction, batchDescription, commandHelp, parseBotCommand, renderPlanningPng } from "./whatsapp.js";
 import { buildDailyDetailsPdf, buildDailyHoursPdf, previousParisDate } from "./reports.js";
 
 const apiUrl=method=>`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`;
@@ -66,7 +66,7 @@ const handleCommand=async(db,chatId,input)=>{
     const people=db.prepare("SELECT first_name AS first,last_name AS last,role FROM employees WHERE active=1 ORDER BY first_name,last_name").all(),records=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(reportDate),pdf=buildDailyHoursPdf(reportDate,people,records);
     return sendDocument(chatId,pdf,`heures-employes-${reportDate}.pdf`,`Heures des employés du ${reportDate.split("-").reverse().join("/")}`,menu());
   }
-  const command=parseWhatsAppCommand(db,input);
+  const command=parseBotCommand(db,input);
   if(command.type==="help")return sendText(chatId,`${commandHelp()}\n\nVous pouvez aussi utiliser les boutons ci-dessous.`,menu());
   if(command.type==="error")return sendText(chatId,command.message,menu());
   if(command.type==="cancel"){
@@ -76,18 +76,18 @@ const handleCommand=async(db,chatId,input)=>{
   if(command.type==="confirm"){
     const pending=db.prepare("SELECT payload FROM whatsapp_pending_actions WHERE phone_number=? AND expires_at>?").get(owner,new Date().toISOString());
     if(!pending)return sendText(chatId,"Aucune modification en attente.",menu());
-    const action=JSON.parse(pending.payload);
-    applyAction(db,owner,action);
-    return sendText(chatId,`✅ Planning ${action.group==="cuisine"?"Cuisine":"Salle"} mis à jour.\n\n${description(action)}`,menu());
+    const saved=JSON.parse(pending.payload),actions=Array.isArray(saved)?saved:[saved];
+    for(const action of actions)applyAction(db,owner,action);
+    return sendText(chatId,`✅ ${actions.length} service${actions.length>1?"s":""} enregistré${actions.length>1?"s":""}.\n\n${batchDescription(actions)}`,menu());
   }
   if(command.type==="planning"){
     const label=command.group==="cuisine"?"Cuisine":"Salle";
     const png=await renderPlanningPng(db,command.weekStart,command.group);
     return sendPhoto(chatId,png,`Planning ${label} · semaine du ${command.weekStart.split("-").reverse().join("/")}`,menu());
   }
-  const expires=new Date(Date.now()+10*60*1000).toISOString();
-  db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(owner,command.action,JSON.stringify(command),expires);
-  return sendText(chatId,`⚠️ Confirmez cette modification :\n\n${description(command)}`,{inline_keyboard:[[{text:"✅ Confirmer",callback_data:"confirm_action"},{text:"❌ Annuler",callback_data:"cancel_action"}]]});
+  const actions=command.type==="pending_batch"?command.actions:[command],expires=new Date(Date.now()+10*60*1000).toISOString();
+  db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(owner,actions.length>1?"batch":actions[0].action,JSON.stringify(actions.length>1?actions:actions[0]),expires);
+  return sendText(chatId,`⚠️ Confirmez ${actions.length>1?`ces ${actions.length} modifications`:"cette modification"} :\n\n${batchDescription(actions)}`,{inline_keyboard:[[{text:"✅ Confirmer",callback_data:"confirm_action"},{text:"❌ Annuler",callback_data:"cancel_action"}]]});
 };
 
 export const createTelegramHandler=({db,json})=>async(req,res)=>{

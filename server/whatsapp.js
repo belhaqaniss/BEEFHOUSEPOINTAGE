@@ -66,6 +66,7 @@ export const commandHelp=()=>[
   "• planning cuisine semaine prochaine",
   "• ajouter Mohamed Emran lundi matin 09h30 15h",
   "• ajouter Mohamed Emran lundi soir 18h fermeture",
+  "• ajouter Aniss Belhaq vendredi matin 09h30 15h samedi soir 18h 00h",
   "• modifier Walid Belhaniche mardi soir 20h 00h30",
   "• supprimer Mohamed Emran mercredi matin",
   "Répondez CONFIRMER ou ANNULER après une modification."
@@ -90,7 +91,24 @@ export const parseWhatsAppCommand=(db,input)=>{
   return {type:"pending",action:"set",group,employeeId:employee.id,employeeName:`${employee.first} ${employee.last}`,workDate,service,startMinutes,endMinutes,closing};
 };
 
+export const parseBotCommand=(db,input)=>{
+  const text=normalize(input),days=[...text.matchAll(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/g)];
+  if(days.length<2)return parseWhatsAppCommand(db,input);
+  const operation=text.startsWith("supprimer ")?"supprimer":text.startsWith("modifier ")?"modifier":text.startsWith("ajouter ")?"ajouter":null;
+  if(!operation)return parseWhatsAppCommand(db,input);
+  const employee=findEmployee(db,input);if(!employee)return {type:"error",message:"Employé introuvable. Écrivez son prénom et son nom complets."};
+  const nextWeek=text.includes("semaine prochaine"),actions=[];
+  for(let index=0;index<days.length;index++){
+    const start=days[index].index??0,end=index+1<days.length?(days[index+1].index??text.length):text.length,segment=text.slice(start,end).replace(/\b(pour la )?semaine prochaine\b/g,"").trim(),synthetic=`${operation} ${employee.first} ${employee.last} ${segment}${nextWeek?" semaine prochaine":""}`,parsed=parseWhatsAppCommand(db,synthetic);
+    if(parsed.type==="error")return parsed;
+    if(parsed.type!=="pending")return {type:"error",message:`Commande incomplète près de « ${segment} ».`};
+    actions.push(parsed);
+  }
+  return {type:"pending_batch",actions};
+};
+
 export const description=action=>action.action==="delete"?`SUPPRIMER ${action.employeeName}\n${action.workDate} · ${action.service}`:`ENREGISTRER ${action.employeeName}\n${action.workDate} · ${action.service}\n${timeLabel(action.startMinutes)} — ${action.closing?"FERMETURE":timeLabel(action.endMinutes)}`;
+export const batchDescription=actions=>actions.map((action,index)=>`${index+1}. ${description(action)}`).join("\n\n");
 
 export const applyAction=(db,phone,action)=>{
   const createdBy=db.prepare("SELECT id FROM admins WHERE role='superadmin' ORDER BY id LIMIT 1").get()?.id||null;
@@ -140,17 +158,17 @@ const mainMenu=phone=>sendButtons(phone,"Que souhaitez-vous consulter ?",[
 const handleMessage=async(db,phone,text)=>{
   if(!configuredAdmins().has(phone)){await sendText(phone,"Ce numéro n’est pas autorisé à gérer le planning BEEF HOUSE.");return}
   db.prepare("DELETE FROM whatsapp_pending_actions WHERE expires_at<=?").run(new Date().toISOString());
-  const command=parseWhatsAppCommand(db,text);
+  const command=parseBotCommand(db,text);
   if(command.type==="help"){await sendText(phone,commandHelp());await mainMenu(phone);return}
   if(command.type==="error"){await sendText(phone,command.message);return}
   if(command.type==="cancel"){db.prepare("DELETE FROM whatsapp_pending_actions WHERE phone_number=?").run(phone);await sendText(phone,"Modification annulée.");return}
   if(command.type==="confirm"){
     const pending=db.prepare("SELECT payload FROM whatsapp_pending_actions WHERE phone_number=? AND expires_at>?").get(phone,new Date().toISOString());if(!pending){await sendText(phone,"Aucune modification en attente. Envoyez « aide » pour voir les commandes.");return}
-    const action=JSON.parse(pending.payload);applyAction(db,phone,action);await sendText(phone,`✅ Planning ${action.group==="cuisine"?"Cuisine":"Salle"} mis à jour.\n\n${description(action)}`);await mainMenu(phone);return;
+    const saved=JSON.parse(pending.payload),actions=Array.isArray(saved)?saved:[saved];for(const action of actions)applyAction(db,phone,action);await sendText(phone,`✅ ${actions.length} service${actions.length>1?"s":""} enregistré${actions.length>1?"s":""}.\n\n${batchDescription(actions)}`);await mainMenu(phone);return;
   }
   if(command.type==="planning"){const label=command.group==="cuisine"?"Cuisine":"Salle",png=await renderPlanningPng(db,command.weekStart,command.group);await sendImage(phone,png,`Planning ${label} · semaine du ${command.weekStart.split("-").reverse().join("/")}`,`planning-${command.group}.png`);await mainMenu(phone);return}
-  const expires=new Date(Date.now()+10*60*1000).toISOString();db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(phone,command.action,JSON.stringify(command),expires);
-  await sendButtons(phone,`⚠️ Confirmez cette modification :\n\n${description(command)}\n\nValable pendant 10 minutes.`,[{id:"confirm_action",title:"Confirmer"},{id:"cancel_action",title:"Annuler"}]);
+  const actions=command.type==="pending_batch"?command.actions:[command],expires=new Date(Date.now()+10*60*1000).toISOString();db.prepare("INSERT INTO whatsapp_pending_actions(phone_number,action,payload,expires_at) VALUES(?,?,?,?) ON CONFLICT(phone_number) DO UPDATE SET action=excluded.action,payload=excluded.payload,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP").run(phone,actions.length>1?"batch":actions[0].action,JSON.stringify(actions.length>1?actions:actions[0]),expires);
+  await sendButtons(phone,`⚠️ Confirmez ${actions.length>1?`ces ${actions.length} modifications`:"cette modification"} :\n\n${batchDescription(actions)}\n\nValable pendant 10 minutes.`,[{id:"confirm_action",title:"Confirmer"},{id:"cancel_action",title:"Annuler"}]);
 };
 
 export const createWhatsAppHandler=({db,json})=>async(req,res,url)=>{

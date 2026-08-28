@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { parseWhatsAppCommand, renderKitchenPlanningPng, renderPlanningPng } from "./whatsapp.js";
+import { parseBotCommand, parseWhatsAppCommand, renderKitchenPlanningPng, renderPlanningPng } from "./whatsapp.js";
 
 const database=()=>{
   const db=new DatabaseSync(":memory:");
@@ -29,6 +29,11 @@ test("comprend une suppression",()=>{
 test("comprend le planning Salle et une modification Salle",()=>{
   const db=database(),planning=parseWhatsAppCommand(db,"planning salle semaine prochaine"),command=parseWhatsAppCommand(db,"ajouter Aniss Belhaq 2026-08-27 matin 09h30 15h");
   assert.equal(planning.type,"planning");assert.equal(planning.group,"salle");assert.equal(command.type,"pending");assert.equal(command.group,"salle");assert.equal(command.employeeId,3);
+});
+
+test("comprend plusieurs services dans une seule commande",()=>{
+  const db=database(),command=parseBotCommand(db,"Ajouter Aniss Belhaq pour la semaine prochaine vendredi matin 9h30 15h samedi soir 18h 00h dimanche matin 12h 18h30");
+  assert.equal(command.type,"pending_batch");assert.equal(command.actions.length,3);assert.deepEqual(command.actions.map(action=>action.service),["matin","soir","matin"]);assert.deepEqual(command.actions.map(action=>[action.startMinutes,action.endMinutes]),[[570,900],[1080,1440],[720,1110]]);
 });
 
 test("génère une image PNG du planning",async()=>{
