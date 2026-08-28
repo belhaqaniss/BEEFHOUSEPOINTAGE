@@ -1,0 +1,26 @@
+.menu-panel h4 {
+  margin: 16px 0 8px;
+  color: #747986;
+  font-size: 9px;
+  letter-spacing: .12em;
+}
+
+.custom-item {
+  grid-template-columns: 1fr 100px 70px auto;
+}
+
+.drink-item {
+  padding: 12px;
+  border-radius: 10px;
+  background: #f5f8fc;
+}
+
+@media (max-width: 800px) {
+  .custom-item {
+    grid-template-columns: 1fr 90px 70px;
+  }
+
+  .custom-item button {
+    grid-column: 1 / -1;
+  }
+}

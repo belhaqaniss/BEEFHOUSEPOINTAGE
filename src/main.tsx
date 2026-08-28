@@ -8,6 +8,7 @@ import "./superadmin.css";
 import "./daily-details.css";
 import "./admin-tabs.css";
 import "./order-split.css";
+import "./order-split-drinks.css";
 import "./mobile.css";
 
 createRoot(document.getElementById("root")!).render(
