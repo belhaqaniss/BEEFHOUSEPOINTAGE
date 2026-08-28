@@ -13,6 +13,7 @@ const database=()=>{
   db.prepare("INSERT INTO employees VALUES(1,'Mohamed','Emran','Cuisine',1)").run();
   db.prepare("INSERT INTO employees VALUES(2,'Walid','Belhaniche','Cuisine',1)").run();
   db.prepare("INSERT INTO employees VALUES(3,'Aniss','Belhaq','Salle',1)").run();
+  db.prepare("INSERT INTO employees VALUES(4,'Abdel','Mansri','Cuisine',1)").run();
   return db;
 };
 
@@ -24,6 +25,17 @@ test("comprend une plage Cuisine et l’alias Ali",()=>{
 test("comprend une suppression",()=>{
   const db=database(),command=parseWhatsAppCommand(db,"supprimer Walid Belhaniche 2026-08-27 matin");
   assert.equal(command.type,"pending");assert.equal(command.action,"delete");assert.equal(command.employeeId,2);
+});
+
+test("comprend les variantes annuler et supprimer",()=>{
+  const db=database();
+  for(const word of ["annuler","annulez","annulé"])assert.equal(parseBotCommand(db,word).type,"cancel");
+  for(const word of ["supprimer","supprimez","supprimé"]){const command=parseBotCommand(db,`${word} Walid Belhaniche 2026-08-27 matin`);assert.equal(command.type,"pending");assert.equal(command.action,"delete")}
+});
+
+test("remplace un employé sur un service",()=>{
+  const db=database(),command=parseBotCommand(db,"remplacer Mohamed Emran lundi matin de 9h30 12h par Abdel Mansri");
+  assert.equal(command.type,"pending_batch");assert.equal(command.actions.length,2);assert.deepEqual(command.actions.map(action=>action.action),["delete","set"]);assert.deepEqual(command.actions.map(action=>action.employeeId),[1,4]);assert.equal(command.actions[1].startMinutes,570);assert.equal(command.actions[1].endMinutes,720);
 });
 
 test("comprend le planning Salle et une modification Salle",()=>{

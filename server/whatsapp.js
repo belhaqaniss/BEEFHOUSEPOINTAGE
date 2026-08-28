@@ -69,6 +69,7 @@ export const commandHelp=()=>[
   "• ajouter Aniss Belhaq vendredi matin 09h30 15h samedi soir 18h 00h",
   "• modifier Walid Belhaniche mardi soir 20h 00h30",
   "• supprimer Mohamed Emran mercredi matin",
+  "• remplacer Mohamed Emran lundi matin de 09h30 à 12h par Abdel Mansri",
   "Répondez CONFIRMER ou ANNULER après une modification."
 ].join("\n");
 
@@ -76,9 +77,9 @@ export const parseWhatsAppCommand=(db,input)=>{
   const text=normalize(input);
   if(["aide","help","commandes","menu"].includes(text))return {type:"help"};
   if(text==="confirmer"||text==="confirmation"||text==="oui")return {type:"confirm"};
-  if(text==="annuler"||text==="annulation"||text==="non")return {type:"cancel"};
+  if(["annuler","annule","annulez","annulation","non"].includes(text))return {type:"cancel"};
   if(text.includes("planning")&&(text.includes("cuisine")||text.includes("salle")))return {type:"planning",group:text.includes("cuisine")?"cuisine":"salle",weekStart:iso(addDays(mondayOf(parisToday()),text.includes("semaine prochaine")?7:0))};
-  const operation=text.startsWith("supprimer ")?"delete":text.startsWith("ajouter ")||text.startsWith("modifier ")?"set":null;
+  const operation=/^(supprimer|supprimez|supprime)\s/.test(text)?"delete":text.startsWith("ajouter ")||text.startsWith("modifier ")?"set":null;
   if(!operation)return {type:"help"};
   const employee=findEmployee(db,input);if(!employee)return {type:"error",message:"Employé introuvable. Écrivez son prénom et son nom complets."};
   const service=text.includes(" soir")?"soir":text.includes(" matin")?"matin":null;if(!service)return {type:"error",message:"Précisez le service : matin ou soir."};
@@ -92,9 +93,23 @@ export const parseWhatsAppCommand=(db,input)=>{
 };
 
 export const parseBotCommand=(db,input)=>{
-  const text=normalize(input),days=[...text.matchAll(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/g)];
+  const text=normalize(input);
+  if(text.startsWith("remplacer ")){
+    const separator=text.lastIndexOf(" par ");
+    if(separator<0)return {type:"error",message:"Utilisez : remplacer [ancien employé] [jour] [service] [heures] par [nouvel employé]."};
+    const sourceText=text.slice(10,separator).trim(),targetText=text.slice(separator+4).trim(),source=findEmployee(db,sourceText),target=findEmployee(db,targetText);
+    if(!source)return {type:"error",message:"Employé à remplacer introuvable. Écrivez son prénom et son nom complets."};
+    if(!target)return {type:"error",message:"Nouvel employé introuvable. Écrivez son prénom et son nom complets."};
+    if(source.id===target.id)return {type:"error",message:"Choisissez deux employés différents pour effectuer le remplacement."};
+    const schedule=parseWhatsAppCommand(db,`modifier ${source.first} ${source.last} ${sourceText}`);
+    if(schedule.type!=="pending")return schedule;
+    const remove={type:"pending",action:"delete",group:schedule.group,employeeId:source.id,employeeName:`${source.first} ${source.last}`,workDate:schedule.workDate,service:schedule.service};
+    const add={...schedule,group:String(target.role).toLowerCase().includes("cuisine")?"cuisine":"salle",employeeId:target.id,employeeName:`${target.first} ${target.last}`};
+    return {type:"pending_batch",actions:[remove,add]};
+  }
+  const days=[...text.matchAll(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/g)];
   if(days.length<2)return parseWhatsAppCommand(db,input);
-  const operation=text.startsWith("supprimer ")?"supprimer":text.startsWith("modifier ")?"modifier":text.startsWith("ajouter ")?"ajouter":null;
+  const operation=/^(supprimer|supprimez|supprime)\s/.test(text)?"supprimer":text.startsWith("modifier ")?"modifier":text.startsWith("ajouter ")?"ajouter":null;
   if(!operation)return parseWhatsAppCommand(db,input);
   const employee=findEmployee(db,input);if(!employee)return {type:"error",message:"Employé introuvable. Écrivez son prénom et son nom complets."};
   const nextWeek=text.includes("semaine prochaine"),actions=[];
