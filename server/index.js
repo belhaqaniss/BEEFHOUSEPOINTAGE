@@ -212,9 +212,7 @@ const server = createServer(async (req, res) => {
         const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map();let totalMs=0,shifts=0;
         for(const event of own){
           if(event.type==="Arrivée"){
-            let start=new Date(event.timestamp);
-            const actualMinutes=parisMinutes(event.timestamp),scheduled=parisHour(event.timestamp)>=15?event.scheduledEveningStartMinutes:event.scheduledMorningStartMinutes,earlyMinutes=scheduled===null?0:Number(scheduled)-actualMinutes;if(earlyMinutes>0&&earlyMinutes<=15)start=new Date(start.getTime()+earlyMinutes*60000);
-            openByDate.set(`${event.workDate}:${event.service}`,start);
+            openByDate.set(`${event.workDate}:${event.service}`,new Date(event.timestamp));
           } else {
             const key=`${event.workDate}:${event.service}`,start=openByDate.get(key),end=new Date(event.timestamp);
             if(start&&!Number.isNaN(end.getTime())){const day=24*60*60*1000,difference=end.getTime()-start.getTime();totalMs+=((difference%day)+day)%day;shifts++;openByDate.delete(key);}
@@ -345,11 +343,13 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "setScheduleBlockRange") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),first=Number(data.startMinutes),last=Number(data.endMinutes),startMinutes=Math.min(first,last),endMinutes=Math.max(first,last);
+      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),first=Number(data.startMinutes),last=Number(data.endMinutes),startMinutes=Math.min(first,last),endMinutes=Math.max(first,last),service=String(data.service||"matin");
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||startMinutes<420||endMinutes>1560||startMinutes%30||endMinutes%30)throw new Error("Plage de planning invalide");
+      if(!["matin","soir"].includes(service))throw new Error("Service de planning invalide");
+      if(endMinutes===1560&&service!=="soir")throw new Error("La fermeture peut uniquement être utilisée pour le service du soir");
       const includesClosing=endMinutes===1560,blockEnd=includesClosing?1530:endMinutes,values=[];for(let minutes=startMinutes;minutes<=blockEnd;minutes+=30)values.push(minutes);
       const existing=new Set(db.prepare("SELECT start_minutes AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes BETWEEN ? AND ?").all(employeeId,workDate,startMinutes,blockEnd).map(row=>row.startMinutes)),closingExists=includesClosing&&Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service='soir'").get(employeeId,workDate)),remove=values.every(minutes=>existing.has(minutes))&&(!includesClosing||closingExists);
-      db.exec("BEGIN");try{if(remove){if(values.length)db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes BETWEEN ? AND ?").run(employeeId,workDate,startMinutes,blockEnd);if(includesClosing)db.prepare("DELETE FROM schedule_closings WHERE employee_id=? AND work_date=? AND service='soir'").run(employeeId,workDate)}else{const insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?) ON CONFLICT(employee_id,work_date,start_minutes) DO UPDATE SET service=excluded.service,created_by=excluded.created_by");for(const minutes of values)insert.run(employeeId,workDate,minutes,minutes>=1020?"soir":"matin",current.id);if(includesClosing)db.prepare("INSERT INTO schedule_closings(employee_id,work_date,service,created_by) VALUES(?,?,?,?) ON CONFLICT(employee_id,work_date,service) DO UPDATE SET created_by=excluded.created_by").run(employeeId,workDate,"soir",current.id)}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      db.exec("BEGIN");try{if(remove){if(values.length)db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes BETWEEN ? AND ?").run(employeeId,workDate,startMinutes,blockEnd);if(includesClosing)db.prepare("DELETE FROM schedule_closings WHERE employee_id=? AND work_date=? AND service='soir'").run(employeeId,workDate)}else{const insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?) ON CONFLICT(employee_id,work_date,start_minutes) DO UPDATE SET service=excluded.service,created_by=excluded.created_by");for(const minutes of values)insert.run(employeeId,workDate,minutes,service,current.id);if(includesClosing)db.prepare("INSERT INTO schedule_closings(employee_id,work_date,service,created_by) VALUES(?,?,?,?) ON CONFLICT(employee_id,work_date,service) DO UPDATE SET created_by=excluded.created_by").run(employeeId,workDate,"soir",current.id)}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
       return json(res,200,{success:true,removed:remove});
     }
     return json(res,400,{success:false,message:"Action inconnue"});
