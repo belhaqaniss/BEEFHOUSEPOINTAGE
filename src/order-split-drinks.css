@@ -15,7 +15,14 @@
   background: #f5f8fc;
 }
 
+.split-top {
+  grid-template-columns: 1fr 1fr 1fr .75fr auto;
+}
+
 @media (max-width: 800px) {
+  .split-top {
+    grid-template-columns: 1fr;
+  }
   .custom-item {
     grid-template-columns: 1fr 90px 70px;
   }
