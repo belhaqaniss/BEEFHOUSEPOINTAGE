@@ -146,9 +146,9 @@ const server = createServer(async (req, res) => {
     if (data.action === "saveTips") {
       const current=requireOperationalAdmin(req),workDate=String(data.workDate||""),morningCents=Math.max(0,Math.round(Number(data.morningAmount||0)*100)),eveningCents=Math.max(0,Math.round(Number(data.eveningAmount||0)*100));
       if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isFinite(morningCents)||!Number.isFinite(eveningCents))throw new Error("Date ou montant de pourboire invalide");
-      const arrivals=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,a.timestamp,a.service FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? AND a.type='Arrivée' AND e.active=1 ORDER BY a.timestamp").all(workDate);
+      const planned=db.prepare("SELECT DISTINCT e.id,e.first_name||' '||e.last_name AS name,e.role,s.service FROM schedule_blocks s JOIN employees e ON e.id=s.employee_id WHERE s.work_date=? AND e.active=1 ORDER BY s.service,e.first_name,e.last_name").all(workDate);
       const recipients={matin:new Map(),soir:new Map()};
-      for(const arrival of arrivals){const service=parisMinutes(arrival.timestamp)<15*60?"matin":"soir",isKitchen=String(arrival.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${arrival.id}`;recipients[service].set(key,isKitchen?"Cuisine":arrival.name);}
+      for(const person of planned){const service=person.service==="soir"?"soir":"matin",isKitchen=String(person.role).toLowerCase().includes("cuisine"),key=isKitchen?"cuisine":`employee:${person.id}`;recipients[service].set(key,isKitchen?"Cuisine":person.name);}
       const previous=db.prepare("SELECT service,recipient_key AS recipientKey,claimed,claimed_at AS claimedAt FROM tip_allocations WHERE work_date=?").all(workDate),status=new Map(previous.map(row=>[`${row.service}:${row.recipientKey}`,row]));
       db.exec("BEGIN");
       try{
