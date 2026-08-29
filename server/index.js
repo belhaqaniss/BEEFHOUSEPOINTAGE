@@ -360,6 +360,12 @@ const server = createServer(async (req, res) => {
       db.exec("BEGIN");try{const removeBlocks=db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=?"),removeClosings=db.prepare("DELETE FROM schedule_closings WHERE employee_id=? AND work_date=?"),insert=db.prepare("INSERT INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) VALUES(?,?,?,?,?) ON CONFLICT(employee_id,work_date,start_minutes) DO UPDATE SET service=excluded.service,created_by=excluded.created_by"),insertClosing=db.prepare("INSERT INTO schedule_closings(employee_id,work_date,service,created_by) VALUES(?,?,?,?)");for(const date of dates){removeBlocks.run(employeeId,date);removeClosings.run(employeeId,date)}for(const entry of cleaned){for(let minutes=entry.startMinutes;minutes<entry.endMinutes;minutes+=30)insert.run(employeeId,entry.workDate,minutes,entry.service,current.id);if(entry.closing)insertClosing.run(employeeId,entry.workDate,entry.service,current.id)}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
       return json(res,200,{success:true});
     }
+    if (data.action === "deleteScheduleService") {
+      requireSuperAdmin(req);const employeeId=Number(data.employeeId),workDate=String(data.workDate||""),service=String(data.service||"");
+      if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!["matin","soir"].includes(service))throw new Error("Service de planning invalide");
+      db.exec("BEGIN");try{db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").run(employeeId,workDate,service);db.prepare("DELETE FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").run(employeeId,workDate,service);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      return json(res,200,{success:true});
+    }
     return json(res,400,{success:false,message:"Action inconnue"});
   } catch (error) { return json(res,error.status||400,{success:false,message:error.message||"Erreur serveur"}); }
 });
