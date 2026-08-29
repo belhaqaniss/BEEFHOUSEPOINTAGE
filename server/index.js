@@ -317,6 +317,15 @@ const server = createServer(async (req, res) => {
       blocks.push(...db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,1560 AS startMinutes,service,1 AS closing FROM schedule_closings WHERE work_date BETWEEN ? AND ? ORDER BY work_date,employee_id").all(start,end));
       return json(res,200,{success:true,blocks});
     }
+    if (data.action === "ensureSalleWeek") {
+      const current=requireSuperAdmin(req),start=String(data.weekStart||""),startDate=new Date(`${start}T12:00:00Z`);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||Number.isNaN(startDate.getTime()))throw new Error("Semaine invalide");
+      const endDate=new Date(startDate);endDate.setUTCDate(endDate.getUTCDate()+6);const end=endDate.toISOString().slice(0,10),previousStartDate=new Date(startDate);previousStartDate.setUTCDate(previousStartDate.getUTCDate()-7);const previousStart=previousStartDate.toISOString().slice(0,10),previousEndDate=new Date(previousStartDate);previousEndDate.setUTCDate(previousEndDate.getUTCDate()+6);const previousEnd=previousEndDate.toISOString().slice(0,10);
+      const existing=db.prepare("SELECT COUNT(*) AS value FROM schedule_blocks s JOIN employees e ON e.id=s.employee_id WHERE s.work_date BETWEEN ? AND ? AND lower(e.role) NOT LIKE '%cuisine%'").get(start,end).value;
+      if(existing)return json(res,200,{success:true,copied:false});
+      db.exec("BEGIN");try{db.prepare("INSERT OR IGNORE INTO schedule_blocks(employee_id,work_date,start_minutes,service,created_by) SELECT s.employee_id,date(s.work_date,'+7 day'),s.start_minutes,s.service,? FROM schedule_blocks s JOIN employees e ON e.id=s.employee_id WHERE s.work_date BETWEEN ? AND ? AND e.active=1 AND lower(e.role) NOT LIKE '%cuisine%'").run(current.id,previousStart,previousEnd);db.prepare("INSERT OR IGNORE INTO schedule_closings(employee_id,work_date,service,created_by) SELECT s.employee_id,date(s.work_date,'+7 day'),s.service,? FROM schedule_closings s JOIN employees e ON e.id=s.employee_id WHERE s.work_date BETWEEN ? AND ? AND e.active=1 AND lower(e.role) NOT LIKE '%cuisine%'").run(current.id,previousStart,previousEnd);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      return json(res,200,{success:true,copied:true});
+    }
     if (data.action === "toggleScheduleBlock") {
       const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes);
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isInteger(startMinutes)||startMinutes<420||startMinutes>1560||startMinutes%30) throw new Error("Créneau invalide");

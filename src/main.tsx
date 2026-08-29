@@ -10,6 +10,7 @@ import "./admin-tabs.css";
 import "./order-split.css";
 import "./order-split-drinks.css";
 import "./planning-method-three.css";
+import "./planning-week-banner.css";
 import "./mobile.css";
 
 createRoot(document.getElementById("root")!).render(
