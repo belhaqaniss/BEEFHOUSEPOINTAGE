@@ -20,10 +20,14 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
+    "qrcode": "^1.5.4",
     "react": "latest",
     "react-dom": "latest",
     "sharp": "^0.35.3",
     "typescript": "latest",
     "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

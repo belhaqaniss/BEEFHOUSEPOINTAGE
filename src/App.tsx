@@ -1,9 +1,12 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SuperAdminDashboard from "./SuperAdminDashboard";
 import HyperAdminDashboard from "./HyperAdminDashboard";
 import TipDashboard from "./TipDashboard";
 import OrderSplitDashboard from "./OrderSplitDashboard";
+import EmployeePortal from "./EmployeePortal";
+import QrAttendanceCard from "./QrAttendanceCard";
+import SignaturePad from "./SignaturePad";
 import "./attendance-editor.css";
 import "./login-password.css";
 import "./attendance-pairs.css";
@@ -22,17 +25,7 @@ const storedAuth=(key:string)=>localStorage.getItem(key)||sessionStorage.getItem
 const api=async(data:object)=>{const token=storedAuth("presence-token");const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(data)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result?.success===false)throw new Error(result.message||"Erreur du serveur");return result;};
 const tabForRole=(role:string):"pointage"|"superadmin"|"hyperadmin"=>role==="hyperadmin"?"hyperadmin":role==="superadmin"?"superadmin":"pointage";
 
-function Signature({setValue}:{setValue:(s:string)=>void}){
- const ref=useRef<HTMLCanvasElement>(null),down=useRef(false);
- const pos=(e:React.PointerEvent<HTMLCanvasElement>)=>{const r=e.currentTarget.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}};
- const start=(e:React.PointerEvent<HTMLCanvasElement>)=>{down.current=true;e.currentTarget.setPointerCapture(e.pointerId);const c=e.currentTarget.getContext("2d"),p=pos(e);if(c){c.beginPath();c.moveTo(p.x,p.y);c.strokeStyle="#172139";c.lineWidth=2.5;c.lineCap="round"}};
- const move=(e:React.PointerEvent<HTMLCanvasElement>)=>{if(!down.current)return;const c=e.currentTarget.getContext("2d"),p=pos(e);if(c){c.lineTo(p.x,p.y);c.stroke()}};
- const end=()=>{down.current=false;if(ref.current)setValue(ref.current.toDataURL())};
- const clear=()=>{const c=ref.current;if(c){c.getContext("2d")?.clearRect(0,0,c.width,c.height);setValue("")}};
- return <div className="signature"><canvas ref={ref} width="430" height="135" onPointerDown={start} onPointerMove={move} onPointerUp={end}/><em>Signez avec votre doigt ou votre souris</em><button onClick={clear}>Effacer</button></div>
-}
-
-export default function AttendanceApp(){
+function AdminApp(){
  const[loggedIn,setLoggedIn]=useState(false),[login,setLogin]=useState({username:"",password:""}),[loginError,setLoginError]=useState(""),[showPassword,setShowPassword]=useState(false);
  const[tab,setTab]=useState<"pointage"|"commande"|"details"|"hours"|"pourboire"|"superadmin"|"hyperadmin">("pointage"),[search,setSearch]=useState(""),[person,setPerson]=useState<Person|null>(null),[sign,setSign]=useState(""),[mode,setMode]=useState("Arrivée"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[adminRole,setAdminRole]=useState(storedAuth("presence-role")||"admin");
  const[form,setForm]=useState({cashierMorning:"",cashierEvening:"",fdcMorning:"",fdcEvening:"",fdcFinal:"",cbAmount:"",cashAmount:"",totalAmount:""});
@@ -62,7 +55,7 @@ export default function AttendanceApp(){
  const addDetailEntry=()=>{const label=entryForm.label.trim(),amount=Number(entryForm.amount);if(!label||!Number.isFinite(amount)||amount<0)return;setDetailEntries(entries=>[...entries,{...entryForm,label,amount}]);setEntryForm({kind:"depense",label:"",amount:0,note:""})};
  const add=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);try{await api({action:"details",...form,entries:detailEntries,workDate:reportDate,date:new Date().toISOString()});setMessage("Les détails, dépenses et offerts ont été enregistrés.")}catch(error){setMessage(error instanceof Error?error.message:"L’ajout a échoué. Réessayez.")}finally{setBusy(false)}};
  const downloadDetails=async()=>{try{const result=await api({action:"dailyDetails",workDate:reportDate});if(!result.detail)throw new Error("Enregistrez d’abord les détails de cette journée");downloadDailyDetailsPdf(result.detail as DailyDetail,result.entries||[])}catch(error){setMessage(error instanceof Error?error.message:"Téléchargement impossible")}};
- if(!loggedIn)return <main className="login-page"><section className="login-card"><div className="login-logo">P</div><div className="login-title"><small>ESPACE SÉCURISÉ</small><h1>Bienvenue</h1><p>Connectez-vous pour accéder au registre d’équipe.</p></div><form onSubmit={authenticate}><label>Identifiant<input autoFocus required value={login.username} onChange={e=>setLogin({...login,username:e.target.value})} placeholder="Votre identifiant" autoComplete="username"/></label><label className="password-field">Mot de passe<input required type={showPassword?"text":"password"} value={login.password} onChange={e=>setLogin({...login,password:e.target.value})} placeholder="Votre mot de passe" autoComplete="current-password"/><button className="password-eye" type="button" onClick={()=>setShowPassword(value=>!value)} aria-label={showPassword?"Masquer le mot de passe":"Afficher le mot de passe"}>{showPassword?"◉":"◌"}</button></label>{loginError&&<p className="login-error">{loginError}</p>}<button className="login-submit">Se connecter <span>→</span></button></form><p className="login-help">Accès administrateur · Registre Présence</p></section></main>;
+ if(!loggedIn)return <main className="login-page"><section className="login-card"><div className="login-logo">P</div><div className="login-title"><small>ESPACE SÉCURISÉ</small><h1>Bienvenue</h1><p>Connectez-vous pour accéder au registre d’équipe.</p></div><form onSubmit={authenticate}><label>Identifiant<input autoFocus required value={login.username} onChange={e=>setLogin({...login,username:e.target.value})} placeholder="Votre identifiant" autoComplete="username"/></label><label className="password-field">Mot de passe<input required type={showPassword?"text":"password"} value={login.password} onChange={e=>setLogin({...login,password:e.target.value})} placeholder="Votre mot de passe" autoComplete="current-password"/><button className="password-eye" type="button" onClick={()=>setShowPassword(value=>!value)} aria-label={showPassword?"Masquer le mot de passe":"Afficher le mot de passe"}>{showPassword?"◉":"◌"}</button></label>{loginError&&<p className="login-error">{loginError}</p>}<button className="login-submit">Se connecter <span>→</span></button></form><button className="employee-access-link" onClick={()=>window.location.href=`${window.location.origin}/?employee=1`}>Accéder à l’espace Employé →</button><p className="login-help">Accès administrateur · Registre Présence</p></section></main>;
  return <main>
   <header><div className="brand"><b>P</b></div><div className="header-actions"><div className="date"><i/>{new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"long"}).format(now)}</div><button className="logout" onClick={logout}>Déconnexion</button></div></header>
   <section className="shell">
@@ -79,8 +72,9 @@ export default function AttendanceApp(){
      <div className="switch"><button disabled={selectedHasOpenArrival} className={mode==="Arrivée"?"active":""} onClick={()=>setMode("Arrivée")}>↘ {selectedHasOpenArrival?"Arrivée déjà pointée":selectedShift==="soir"?"Arrivée soir":"Arrivée matin"}</button><button disabled={!selectedHasOpenArrival} className={mode==="Départ"?"active":""} onClick={()=>setMode("Départ")}>↗ Départ {selectedShift==="soir"?"soir":"matin"}</button></div>
      {person&&<p className="planned-start">Planning vérifié · Service {selectedShift} {plannedStart!==null?`prévu à ${String(Math.floor(plannedStart/60)%24).padStart(2,"0")}:${String(plannedStart%60).padStart(2,"0")}`:"sans horaire programmé"}</p>}
      <div className="time"><small>HEURE ACTUELLE</small><strong>{new Intl.DateTimeFormat("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(now)}</strong></div><label className="caption">VOTRE SIGNATURE</label>
-     <Signature key={person?.first||"none"} setValue={setSign}/><button className="primary" disabled={!person||!sign||busy||statusLoading||(mode==="Arrivée"&&selectedHasOpenArrival)||(mode==="Départ"&&!selectedHasOpenArrival)} onClick={submit}>{statusLoading?"Vérification...":busy?"Enregistrement...":`Valider mon ${mode.toLowerCase()}`} →</button><p className="privacy">🔒 Votre signature sert uniquement à confirmer ce pointage.</p>
+     <SignaturePad key={person?.first||"none"} setValue={setSign}/><button className="primary" disabled={!person||!sign||busy||statusLoading||(mode==="Arrivée"&&selectedHasOpenArrival)||(mode==="Départ"&&!selectedHasOpenArrival)} onClick={submit}>{statusLoading?"Vérification...":busy?"Enregistrement...":`Valider mon ${mode.toLowerCase()}`} →</button><p className="privacy">🔒 Votre signature sert uniquement à confirmer ce pointage.</p>
     </section>
+    <QrAttendanceCard api={api}/>
    </div>:tab==="commande"?<OrderSplitDashboard api={api}/>:tab==="details"?<div className="grid details admin-single-panel">
     <section className="card daily-detail-card"><div className="cardhead"><span>1</span><div><h2>Détail journalier</h2><p>Caisses, dépenses et offerts de la journée.</p></div></div><form onSubmit={add}>
      <div className="detail-toolbar"><label>Date<input type="date" value={reportDate} onChange={e=>setReportDate(e.target.value)}/></label><button type="button" onClick={downloadDetails}>↓ Télécharger le document</button><button type="submit" disabled={busy}>{busy?"Enregistrement...":"Enregistrer"}</button></div>
@@ -96,4 +90,9 @@ export default function AttendanceApp(){
    </div>:tab==="pourboire"?<TipDashboard/>:tab==="hyperadmin"?<HyperAdminDashboard/>:<SuperAdminDashboard/>}
   </section><footer><b>Présence</b><span>Pointage simple, équipe sereine.</span><small><i/> Synchronisation Google prête</small></footer>
  </main>
+}
+
+export default function AttendanceApp(){
+ const employeeMode=new URLSearchParams(window.location.search).get("employee")==="1";
+ return employeeMode?<EmployeePortal/>:<AdminApp/>;
 }

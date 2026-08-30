@@ -52,6 +52,42 @@ CREATE TABLE IF NOT EXISTS employees (
   UNIQUE(first_name, last_name)
 );
 
+CREATE TABLE IF NOT EXISTS employee_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL UNIQUE REFERENCES employees(id) ON DELETE CASCADE,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS employee_sessions (
+  token TEXT PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS attendance_qr_challenges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_by INTEGER REFERENCES admins(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS attendance_scan_sessions (
+  token_hash TEXT PRIMARY KEY,
+  challenge_id INTEGER NOT NULL REFERENCES attendance_qr_challenges(id) ON DELETE CASCADE,
+  employee_id INTEGER REFERENCES employees(id),
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_qr_expiry ON attendance_qr_challenges(expires_at);
+CREATE INDEX IF NOT EXISTS idx_employee_sessions_expiry ON employee_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS attendance (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   employee_id INTEGER NOT NULL REFERENCES employees(id),

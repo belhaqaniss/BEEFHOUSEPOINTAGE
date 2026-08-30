@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,26 @@ if(!attendanceColumns.some(column=>column.name==="service")){
 }
 
 const hashPassword = (password, salt) => scryptSync(password, salt, 64).toString("hex");
+const hashToken = token => createHash("sha256").update(String(token)).digest("hex");
+const usernamePart=value=>String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
+const employeeUsername=employee=>{
+  const base=usernamePart(employee.last_name)||usernamePart(employee.first_name)||`employe${employee.id}`;
+  const duplicate=db.prepare("SELECT COUNT(*) AS value FROM employees WHERE active=1 AND lower(last_name)=lower(?)").get(employee.last_name).value>1;
+  const preferred=duplicate?`${base}.${usernamePart(employee.first_name)||employee.id}`:base;
+  let candidate=preferred,index=2;
+  while(db.prepare("SELECT employee_id FROM employee_accounts WHERE username=? COLLATE NOCASE AND employee_id<>?").get(candidate,employee.id))candidate=`${preferred}${index++}`;
+  return candidate;
+};
+const ensureEmployeeAccount=employeeId=>{
+  const employee=db.prepare("SELECT id,first_name,last_name FROM employees WHERE id=? AND active=1").get(employeeId);
+  if(!employee)return null;
+  const existing=db.prepare("SELECT username FROM employee_accounts WHERE employee_id=?").get(employee.id);
+  if(existing)return existing.username;
+  const username=employeeUsername(employee),salt=randomBytes(16).toString("hex");
+  db.prepare("INSERT INTO employee_accounts(employee_id,username,password_hash,password_salt) VALUES(?,?,?,?)").run(employee.id,username,hashPassword("1234",salt),salt);
+  return username;
+};
+const syncEmployeeAccounts=()=>db.prepare("SELECT id FROM employees WHERE active=1 ORDER BY id").all().forEach(employee=>ensureEmployeeAccount(employee.id));
 db.prepare("INSERT OR IGNORE INTO restaurants(name,slug,address) VALUES(?,?,?)").run("BEEF HOUSE","beef-house","");
 const mainRestaurant=db.prepare("SELECT id FROM restaurants WHERE slug='beef-house'").get();
 const seedAdminAccount = (username, password, role) => {
@@ -56,6 +76,7 @@ db.prepare("UPDATE admins SET restaurant_id=? WHERE restaurant_id IS NULL").run(
 const seedHyperAdmin=()=>{if(db.prepare("SELECT id FROM hyper_admins WHERE username='hyperadmin'").get())return;const salt=randomBytes(16).toString("hex");db.prepare("INSERT INTO hyper_admins(username,password_hash,password_salt) VALUES(?,?,?)").run("hyperadmin",hashPassword("hyperadmin",salt),salt)};
 seedHyperAdmin();
 seedEmployees();
+syncEmployeeAccounts();
 
 const json = (res, status, body) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN || "*", "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" }); res.end(JSON.stringify(body)); };
 const body = async req => { const chunks=[]; let size=0; for await (const chunk of req){size+=chunk.length;if(size>3_000_000)throw new Error("Requête trop volumineuse");chunks.push(chunk);} return chunks.length?JSON.parse(Buffer.concat(chunks).toString("utf8")):{}; };
@@ -72,7 +93,14 @@ const requireAdmin = req => { const admin=adminFromRequest(req); if(!admin) thro
 const requireSuperAdmin = req => { const admin=requireAdmin(req); if(!["superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès super administrateur requis"),{status:403}); return admin; };
 const requireHyperAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="hyperadmin") throw Object.assign(new Error("Accès Hyper Admin requis"),{status:403}); return admin; };
 const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(!["admin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
+const employeeFromRequest=req=>{
+  const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
+  if(!token)return null;
+  return db.prepare("SELECT e.id,e.first_name AS first,e.last_name AS last,e.role,a.username FROM employee_sessions s JOIN employees e ON e.id=s.employee_id JOIN employee_accounts a ON a.employee_id=e.id WHERE s.token=? AND s.expires_at>? AND e.active=1").get(token,new Date().toISOString())||null;
+};
+const requireEmployee=req=>{const employee=employeeFromRequest(req);if(!employee)throw Object.assign(new Error("Session employé requise"),{status:401});return employee};
 const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
+const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(timestamp)),part=type=>parts.find(item=>item.type===type)?.value;return `${part("year")}-${part("month")}-${part("day")}`};
 const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
 const nextPointageService=(employeeId,workDate,timestamp)=>{const scheduled=db.prepare("SELECT service,MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? GROUP BY service ORDER BY startMinutes").all(employeeId,workDate),arrived=new Set(db.prepare("SELECT service FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").all(employeeId,workDate).map(row=>row.service)),available=scheduled.filter(item=>!arrived.has(item.service));let selected;if(available.length===1)selected=available[0];else if(available.length>1){const now=parisMinutes(timestamp);selected=[...available].sort((a,b)=>Math.abs(a.startMinutes-now)-Math.abs(b.startMinutes-now))[0];}else{const count=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employeeId,workDate).value;selected={service:count>=1?"soir":"matin",startMinutes:null};}return {service:selected.service,scheduledStartMinutes:selected.startMinutes??null};};
@@ -95,6 +123,45 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && (url.searchParams.get("action") || "employees") === "employees") return json(res, 200, employees());
     if (req.method !== "POST") return json(res, 405, { success:false, message:"Méthode refusée" });
     const data = await body(req);
+    if(data.action==="beginEmployeeScan"){
+      const challenge=db.prepare("SELECT id,expires_at AS expiresAt FROM attendance_qr_challenges WHERE token_hash=? AND expires_at>?").get(hashToken(data.qrToken),new Date().toISOString());
+      if(!challenge)throw Object.assign(new Error("Ce QR code a expiré. Scannez le nouveau code affiché."),{status:410});
+      const scanToken=randomBytes(32).toString("hex"),expiresAt=new Date(Date.now()+2*60*1000).toISOString();
+      db.prepare("INSERT INTO attendance_scan_sessions(token_hash,challenge_id,expires_at) VALUES(?,?,?)").run(hashToken(scanToken),challenge.id,expiresAt);
+      return json(res,200,{success:true,scanToken,expiresAt});
+    }
+    if(data.action==="employeeLogin"){
+      const account=db.prepare("SELECT a.*,e.active FROM employee_accounts a JOIN employees e ON e.id=a.employee_id WHERE a.username=? COLLATE NOCASE").get(String(data.username||"").trim());
+      if(!account||!account.active)throw Object.assign(new Error("Identifiants employés incorrects"),{status:401});
+      const given=Buffer.from(hashPassword(String(data.password||""),account.password_salt),"hex"),expected=Buffer.from(account.password_hash,"hex");
+      if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("Identifiants employés incorrects"),{status:401});
+      const token=randomBytes(32).toString("hex"),expiresAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+      db.prepare("INSERT INTO employee_sessions(token,employee_id,expires_at) VALUES(?,?,?)").run(token,account.employee_id,expiresAt);
+      return json(res,200,{success:true,token,expiresAt,role:"employee"});
+    }
+    if(data.action==="employeeLogout"){
+      const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");if(token)db.prepare("DELETE FROM employee_sessions WHERE token=?").run(token);return json(res,200,{success:true});
+    }
+    if(data.action==="employeeDashboard"){
+      const employee=requireEmployee(req),now=new Date().toISOString(),today=parisDate(now),lastEvent=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
+      const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);
+      const endDate=new Date(`${today}T12:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+7);const schedule=db.prepare("SELECT work_date AS workDate,service,MIN(start_minutes) AS startMinutes,MAX(start_minutes)+30 AS endMinutes FROM schedule_blocks WHERE employee_id=? AND work_date BETWEEN ? AND ? GROUP BY work_date,service ORDER BY work_date,startMinutes").all(employee.id,today,endDate.toISOString().slice(0,10)).map(row=>({...row,closing:Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,row.workDate,row.service))}));
+      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule});
+    }
+    if(data.action==="employeePointage"){
+      const employee=requireEmployee(req),signature=String(data.signature||""),scanHash=hashToken(data.scanToken),now=new Date().toISOString();
+      if(!signature.startsWith("data:image/")||signature.length<200||signature.length>1_000_000)throw new Error("Signature invalide");
+      db.exec("BEGIN IMMEDIATE");
+      try{
+        const scan=db.prepare("SELECT token_hash AS tokenHash FROM attendance_scan_sessions WHERE token_hash=? AND expires_at>? AND used_at IS NULL").get(scanHash,now);
+        if(!scan)throw Object.assign(new Error("Cette autorisation de pointage a expiré ou a déjà été utilisée."),{status:410});
+        const lastEvent=db.prepare("SELECT type,service,work_date AS workDate FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id),mode=lastEvent?.type==="Arrivée"?"Départ":"Arrivée",workDate=mode==="Départ"?lastEvent.workDate:parisDate(now),planned=mode==="Arrivée"?nextPointageService(employee.id,workDate,now):{service:lastEvent?.service||"matin",scheduledStartMinutes:null};
+        db.prepare("UPDATE attendance_scan_sessions SET employee_id=?,used_at=? WHERE token_hash=? AND used_at IS NULL").run(employee.id,now,scanHash);
+        db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,mode,now,workDate,planned.service,signature);
+        db.exec("COMMIT");
+        return json(res,200,{success:true,mode,service:planned.service,workDate});
+      }catch(error){db.exec("ROLLBACK");throw error}
+    }
     if (data.action === "login") {
       const admin=db.prepare("SELECT * FROM admins WHERE username=?").get(String(data.username||""));
       if(!admin){const hyper=db.prepare("SELECT * FROM hyper_admins WHERE username=?").get(String(data.username||""));if(!hyper)throw Object.assign(new Error("Identifiants incorrects"),{status:401});const given=Buffer.from(hashPassword(String(data.password||""),hyper.password_salt),"hex"),expected=Buffer.from(hyper.password_hash,"hex");if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("Identifiants incorrects"),{status:401});const token=randomBytes(32).toString("hex"),expires=new Date(Date.now()+365*24*60*60*1000).toISOString();db.prepare("INSERT INTO hyper_sessions(token,hyper_admin_id,expires_at) VALUES(?,?,?)").run(token,hyper.id,expires);return json(res,200,{success:true,token,expiresAt:expires,username:hyper.username,role:"hyperadmin"});}
@@ -106,6 +173,13 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "logout") { const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""); if(token){db.prepare("DELETE FROM sessions WHERE token=?").run(token);db.prepare("DELETE FROM hyper_sessions WHERE token=?").run(token);} return json(res,200,{success:true}); }
     if (data.action === "session") { const current=requireAdmin(req); return json(res,200,{success:true,username:current.username,role:current.role,restaurantId:current.restaurantId}); }
+    if(data.action==="createAttendanceQr"){
+      const current=requireOperationalAdmin(req),token=randomBytes(32).toString("hex"),expiresAt=new Date(Date.now()+20_000).toISOString();
+      db.prepare("DELETE FROM attendance_qr_challenges WHERE expires_at<?").run(new Date(Date.now()-5*60*1000).toISOString());
+      db.prepare("DELETE FROM employee_sessions WHERE expires_at<?").run(new Date().toISOString());
+      db.prepare("INSERT INTO attendance_qr_challenges(token_hash,expires_at,created_by) VALUES(?,?,?)").run(hashToken(token),expiresAt,current.id);
+      return json(res,200,{success:true,qrToken:token,expiresAt,refreshAfterMs:10_000});
+    }
     if (data.action === "hyperDashboard") {
       requireHyperAdmin(req);
       const restaurants=db.prepare("SELECT r.id,r.name,r.slug,r.address,r.active,r.created_at AS createdAt,COUNT(DISTINCT a.id) AS administrators FROM restaurants r LEFT JOIN admins a ON a.restaurant_id=r.id GROUP BY r.id ORDER BY r.active DESC,r.name").all();
@@ -118,7 +192,7 @@ const server = createServer(async (req, res) => {
       const salt=randomBytes(16).toString("hex");db.exec("BEGIN");try{const restaurant=db.prepare("INSERT INTO restaurants(name,slug,address) VALUES(?,?,?)").run(name,slug,address);db.prepare("INSERT INTO admins(username,password_hash,password_salt,role,restaurant_id) VALUES(?,?,?,?,?)").run(username,hashPassword(password,salt),salt,"superadmin",restaurant.lastInsertRowid);db.exec("COMMIT");}catch(error){db.exec("ROLLBACK");throw error;}return json(res,200,{success:true});
     }
     if (data.action === "toggleRestaurant") { requireHyperAdmin(req);const id=Number(data.id);db.prepare("UPDATE restaurants SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?").run(id);return json(res,200,{success:true}); }
-    if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue")); return json(res,200,{success:true,employees:employees()}); }
+    if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue"));const employee=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").get(first,last);const username=ensureEmployeeAccount(employee.id); return json(res,200,{success:true,username,employees:employees()}); }
     if (data.action === "deleteEmployee") { requireOperationalAdmin(req); db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
     if (data.action === "pointage") {
       requireOperationalAdmin(req);
@@ -264,7 +338,7 @@ const server = createServer(async (req, res) => {
       };
       const recent=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate FROM attendance a JOIN employees e ON e.id=a.employee_id ORDER BY a.timestamp DESC LIMIT 12").all();
       const admins=db.prepare("SELECT id,username,role,created_at AS createdAt FROM admins ORDER BY role DESC,username").all();
-      const allEmployees=db.prepare("SELECT id,first_name AS first,last_name AS last,role,color,active,created_at AS createdAt FROM employees ORDER BY active DESC,first_name,last_name").all();
+      const allEmployees=db.prepare("SELECT e.id,e.first_name AS first,e.last_name AS last,e.role,e.color,e.active,e.created_at AS createdAt,a.username AS employeeUsername FROM employees e LEFT JOIN employee_accounts a ON a.employee_id=e.id ORDER BY e.active DESC,e.first_name,e.last_name").all();
       const month=today.slice(0,7);
       const financialTotals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE substr(entry_date,1,7)=? GROUP BY kind").all(month);
       const expenseCents=financialTotals.find(row=>row.kind==="depense")?.cents||0,offeredCents=financialTotals.find(row=>row.kind==="offert")?.cents||0;
@@ -289,7 +363,8 @@ const server = createServer(async (req, res) => {
       if(existing)throw Object.assign(new Error("Un employé porte déjà ce prénom et ce nom"),{status:409});
       const result=db.prepare("UPDATE employees SET first_name=?,last_name=? WHERE id=?").run(first,last,id);
       if(!result.changes)throw Object.assign(new Error("Employé introuvable"),{status:404});
-      return json(res,200,{success:true});
+      ensureEmployeeAccount(id);const updated=db.prepare("SELECT id,first_name,last_name FROM employees WHERE id=?").get(id),username=employeeUsername(updated);db.prepare("UPDATE employee_accounts SET username=? WHERE employee_id=?").run(username,id);
+      return json(res,200,{success:true,username});
     }
     if (data.action === "deleteAdmin") {
       const current=requireSuperAdmin(req),target=Number(data.id);
