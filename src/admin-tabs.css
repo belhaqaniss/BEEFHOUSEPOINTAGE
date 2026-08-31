@@ -1,14 +1,15 @@
 .admin-nav {
-  width: 900px;
-  grid-template-columns: repeat(5, 1fr);
+  width: 1050px;
+  grid-template-columns: repeat(6, 1fr);
 }
 
 .admin-single-panel {
   grid-template-columns: 1fr;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .admin-nav {
     width: 100%;
+    grid-template-columns: repeat(3, 1fr);
   }
 }
