@@ -103,6 +103,28 @@ const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS l
 const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(timestamp)),part=type=>parts.find(item=>item.type===type)?.value;return `${part("year")}-${part("month")}-${part("day")}`};
 const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
+const EMPLOYEE_HOURS_START="2026-09-01";
+const employeeAccumulatedMinutes=(employeeId,endDate)=>{
+  if(endDate<EMPLOYEE_HOURS_START)return 0;
+  const events=db.prepare("SELECT a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes FROM attendance a WHERE a.employee_id=? AND a.work_date BETWEEN ? AND ? ORDER BY a.work_date,a.timestamp,a.id").all(employeeId,EMPLOYEE_HOURS_START,endDate),open=new Map();
+  let totalMs=0;
+  for(const event of events){
+    const key=`${event.workDate}:${event.service}`;
+    if(event.type==="Arrivée"){
+      let start=new Date(event.timestamp);
+      if(Number.isFinite(event.scheduledStartMinutes)){
+        const earlyMinutes=event.scheduledStartMinutes-parisMinutes(event.timestamp);
+        if(earlyMinutes>0&&earlyMinutes<=15)start=new Date(start.getTime()+earlyMinutes*60_000);
+      }
+      open.set(key,start);
+      continue;
+    }
+    const start=open.get(key),end=new Date(event.timestamp),difference=end.getTime()-(start?.getTime()||NaN);
+    if(start&&Number.isFinite(difference)&&difference>0&&difference<=24*60*60*1000)totalMs+=difference;
+    open.delete(key);
+  }
+  return Math.round(totalMs/60_000);
+};
 const nextPointageService=(employeeId,workDate,timestamp)=>{const scheduled=db.prepare("SELECT service,MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? GROUP BY service ORDER BY startMinutes").all(employeeId,workDate),arrived=new Set(db.prepare("SELECT service FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").all(employeeId,workDate).map(row=>row.service)),available=scheduled.filter(item=>!arrived.has(item.service));let selected;if(available.length===1)selected=available[0];else if(available.length>1){const now=parisMinutes(timestamp);selected=[...available].sort((a,b)=>Math.abs(a.startMinutes-now)-Math.abs(b.startMinutes-now))[0];}else{const count=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employeeId,workDate).value;selected={service:count>=1?"soir":"matin",startMinutes:null};}return {service:selected.service,scheduledStartMinutes:selected.startMinutes??null};};
 const tipOverview = workDate => {
   const day=db.prepare("SELECT work_date AS workDate,morning_cents/100.0 AS morningAmount,evening_cents/100.0 AS eveningAmount FROM tip_days WHERE work_date=?").get(workDate)||{workDate,morningAmount:0,eveningAmount:0};
@@ -146,7 +168,8 @@ const server = createServer(async (req, res) => {
       const employee=requireEmployee(req),now=new Date().toISOString(),today=parisDate(now),lastEvent=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
       const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);
       const endDate=new Date(`${today}T12:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+7);const schedule=db.prepare("SELECT work_date AS workDate,service,MIN(start_minutes) AS startMinutes,MAX(start_minutes)+30 AS endMinutes FROM schedule_blocks WHERE employee_id=? AND work_date BETWEEN ? AND ? GROUP BY work_date,service ORDER BY work_date,startMinutes").all(employee.id,today,endDate.toISOString().slice(0,10)).map(row=>({...row,closing:Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,row.workDate,row.service))}));
-      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule});
+      const accumulatedMinutes=employeeAccumulatedMinutes(employee.id,today);
+      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedSince:EMPLOYEE_HOURS_START});
     }
     if(data.action==="employeePointage"){
       const employee=requireEmployee(req),signature=String(data.signature||""),scanHash=hashToken(data.scanToken),now=new Date().toISOString();

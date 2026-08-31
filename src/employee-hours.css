@@ -1,0 +1,64 @@
+.employee-hours-total {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 20px;
+  padding: 20px 22px;
+  border: 1px solid #ead9d7;
+  border-radius: 18px;
+  background: linear-gradient(120deg, #fff 0%, #fff8f6 100%);
+  box-shadow: 0 12px 35px #35312b0c;
+}
+
+.employee-hours-icon {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: #b51f2a;
+  color: #fff;
+  font-size: 24px;
+}
+
+.employee-hours-total > div:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.employee-hours-total small {
+  color: #9a5c5f;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.employee-hours-total strong {
+  color: #202532;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.employee-hours-total p {
+  margin: 0;
+  color: #7c818b;
+  font-size: 9px;
+}
+
+@media (max-width: 700px) {
+  .employee-hours-total {
+    align-items: flex-start;
+    padding: 17px;
+  }
+
+  .employee-hours-icon {
+    flex-basis: 46px;
+    width: 46px;
+    height: 46px;
+  }
+
+  .employee-hours-total strong {
+    font-size: 24px;
+  }
+}

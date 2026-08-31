@@ -9,6 +9,8 @@ type Dashboard = {
   lastEvent?: { type: string; timestamp: string; service: string; workDate: string } | null;
   history: { type: string; timestamp: string; service: string; workDate: string }[];
   schedule: { workDate: string; service: string; startMinutes: number; endMinutes: number; closing: boolean }[];
+  accumulatedMinutes: number;
+  accumulatedSince: string;
 };
 
 const request = async (data: object, token = "") => {
@@ -180,6 +182,7 @@ export default function EmployeePortal() {
       <header className="employee-header"><div><b>BEEF HOUSE</b><span>Espace Employé</span></div><button onClick={logout}>Déconnexion</button></header>
       <section className="employee-shell">
         <div className="employee-welcome"><div><small>COMPTE PERSONNEL</small><h1>{dashboard?.employee.first} {dashboard?.employee.last}</h1><p>{dashboard?.employee.role} · @{dashboard?.employee.username}</p></div><span className={dashboard?.hasOpenArrival ? "working" : "away"}>{dashboard?.hasOpenArrival ? "● Au travail" : "○ Non pointé"}</span></div>
+        <section className="employee-hours-total"><div className="employee-hours-icon">◷</div><div><small>HEURES ACCUMULÉES</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>Comptabilisées depuis le 1er septembre 2026 · services terminés uniquement</p></div></section>
         {message && <div className="employee-success">{message}</div>}
         {error && <div className="employee-error">{error}</div>}
         {scanValid ? (

@@ -12,6 +12,7 @@ import "./order-split-drinks.css";
 import "./planning-method-three.css";
 import "./planning-week-banner.css";
 import "./employee-portal.css";
+import "./employee-hours.css";
 import "./qr-camera.css";
 import "./mobile.css";
 
