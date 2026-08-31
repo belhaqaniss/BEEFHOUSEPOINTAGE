@@ -4,6 +4,14 @@
 
 .qr-tab .attendance-qr-card {
   min-height: 460px;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
+}
+
+.qr-tab .qr-visual img,
+.qr-tab .qr-placeholder {
+  width: min(440px, 100%);
+  height: auto;
+  aspect-ratio: 1;
 }
 
 .live-refresh {
@@ -120,6 +128,12 @@
 @media (max-width: 700px) {
   .qr-tab .attendance-qr-card {
     min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .qr-tab .qr-visual img,
+  .qr-tab .qr-placeholder {
+    width: min(360px, 88vw);
   }
 
   .camera-scanner {
