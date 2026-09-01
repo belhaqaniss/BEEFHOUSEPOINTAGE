@@ -15,6 +15,28 @@ const dataDir = join(root, "data");
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, "presence.sqlite"));
 db.exec(readFileSync(join(root, "schema.sql"), "utf8"));
+const adminsTableSql=String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='admins'").get()?.sql||"");
+if(!adminsTableSql.includes("'responsable'")){
+  db.exec("PRAGMA foreign_keys=OFF");
+  try{
+    db.exec(`BEGIN;
+      CREATE TABLE admins_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'superadmin', 'responsable')),
+        restaurant_id INTEGER REFERENCES restaurants(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO admins_new(id,username,password_hash,password_salt,role,restaurant_id,created_at)
+      SELECT id,username,password_hash,password_salt,role,restaurant_id,created_at FROM admins;
+      DROP TABLE admins;
+      ALTER TABLE admins_new RENAME TO admins;
+      COMMIT;`);
+  }catch(error){try{db.exec("ROLLBACK")}catch{}throw error}
+  finally{db.exec("PRAGMA foreign_keys=ON")}
+}
 const adminColumns = db.prepare("PRAGMA table_info(admins)").all();
 if (!adminColumns.some(column => column.name === "role")) {
   db.exec("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
@@ -72,6 +94,7 @@ const seedEmployees = () => {
 };
 seedAdminAccount("admin", "admin", "admin");
 seedAdminAccount("superadmin", "superadmin", "superadmin");
+seedAdminAccount("mehdifanis2006@gmail.com", "1234", "responsable");
 db.prepare("UPDATE admins SET restaurant_id=? WHERE restaurant_id IS NULL").run(mainRestaurant.id);
 const seedHyperAdmin=()=>{if(db.prepare("SELECT id FROM hyper_admins WHERE username='hyperadmin'").get())return;const salt=randomBytes(16).toString("hex");db.prepare("INSERT INTO hyper_admins(username,password_hash,password_salt) VALUES(?,?,?)").run("hyperadmin",hashPassword("hyperadmin",salt),salt)};
 seedHyperAdmin();
@@ -93,6 +116,10 @@ const requireAdmin = req => { const admin=adminFromRequest(req); if(!admin) thro
 const requireSuperAdmin = req => { const admin=requireAdmin(req); if(!["superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès super administrateur requis"),{status:403}); return admin; };
 const requireHyperAdmin = req => { const admin=requireAdmin(req); if(admin.role!=="hyperadmin") throw Object.assign(new Error("Accès Hyper Admin requis"),{status:403}); return admin; };
 const requireOperationalAdmin = req => { const admin=requireAdmin(req); if(!["admin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Le Super Admin ne peut pas effectuer les opérations de pointage"),{status:403}); return admin; };
+const requireNonResponsableAdmin = req => { const admin=requireAdmin(req); if(!["admin","superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Cette fonction n’est pas disponible pour le responsable"),{status:403}); return admin; };
+const requirePointageAdmin = req => { const admin=requireAdmin(req); if(!["admin","responsable","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès au pointage requis"),{status:403}); return admin; };
+const requirePlanningAdmin = req => { const admin=requireAdmin(req); if(!["responsable","superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès au planning requis"),{status:403}); return admin; };
+const requireTeamManager = req => { const admin=requireAdmin(req); if(!["responsable","superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès à la gestion de l’équipe requis"),{status:403}); return admin; };
 const employeeFromRequest=req=>{
   const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
   if(!token)return null;
@@ -216,9 +243,9 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "toggleRestaurant") { requireHyperAdmin(req);const id=Number(data.id);db.prepare("UPDATE restaurants SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?").run(id);return json(res,200,{success:true}); }
     if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue"));const employee=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").get(first,last);const username=ensureEmployeeAccount(employee.id); return json(res,200,{success:true,username,employees:employees()}); }
-    if (data.action === "deleteEmployee") { requireOperationalAdmin(req); db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
+    if (data.action === "deleteEmployee") { requireTeamManager(req); const id=Number(data.id);if(Number.isInteger(id))db.prepare("UPDATE employees SET active=0 WHERE id=?").run(id);else db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
     if (data.action === "pointage") {
-      requireOperationalAdmin(req);
+      requirePointageAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
       const lastEvent=db.prepare("SELECT type,service,work_date AS workDate FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
@@ -230,7 +257,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,shift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes});
     }
     if (data.action === "attendanceStatus") {
-      requireOperationalAdmin(req);
+      requirePointageAdmin(req);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
       const lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null,workDate=String(data.workDate||new Date().toISOString().slice(0,10)),planned=lastEvent?.type==="Arrivée"?{service:lastEvent.service,scheduledStartMinutes:db.prepare("SELECT MIN(start_minutes) AS value FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,lastEvent.workDate,lastEvent.service).value}:nextPointageService(employee.id,workDate,new Date().toISOString());
@@ -276,7 +303,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "dailyDetails") {
-      requireAdmin(req);const workDate=String(data.workDate||"");
+      requireNonResponsableAdmin(req);const workDate=String(data.workDate||"");
       const detail=db.prepare("SELECT id,work_date AS workDate,cashier_morning AS cashierMorning,cashier_evening AS cashierEvening,fdc_morning AS fdcMorning,fdc_evening AS fdcEvening,fdc_final AS fdcFinal,cb_amount AS cbAmount,cash_amount AS cashAmount,total_amount AS totalAmount,created_at AS createdAt FROM daily_details WHERE work_date=? ORDER BY id DESC LIMIT 1").get(workDate)||null;
       const entries=db.prepare("SELECT id,kind,label,amount_cents/100.0 AS amount,note FROM financial_entries WHERE entry_date=? AND source_detail=1 ORDER BY kind,id").all(workDate);
       return json(res,200,{success:true,detail,entries});
@@ -297,8 +324,8 @@ const server = createServer(async (req, res) => {
     if (data.action === "deleteOrderSplit") {
       requireOperationalAdmin(req);db.prepare("DELETE FROM order_splits WHERE id=?").run(Number(data.id));return json(res,200,{success:true});
     }
-    if (data.action === "report") { requireOperationalAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
-    if (data.action === "exportAttendance") { requireAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "report") { requirePointageAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "exportAttendance") { requireNonResponsableAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "monthlyHours") {
       requireSuperAdmin(req);
       const month=String(data.month||"");
@@ -349,6 +376,11 @@ const server = createServer(async (req, res) => {
       catch(error){db.exec("ROLLBACK");throw error;}
       return json(res,200,{success:true});
     }
+    if (data.action === "responsableDashboard") {
+      requirePlanningAdmin(req);
+      const allEmployees=db.prepare("SELECT e.id,e.first_name AS first,e.last_name AS last,e.role,e.color,e.active,e.created_at AS createdAt,a.username AS employeeUsername FROM employees e LEFT JOIN employee_accounts a ON a.employee_id=e.id ORDER BY e.active DESC,e.first_name,e.last_name").all();
+      return json(res,200,{success:true,employees:allEmployees});
+    }
     if (data.action === "superDashboard") {
       requireSuperAdmin(req);
       const today=String(data.workDate||new Date().toISOString().slice(0,10));
@@ -379,12 +411,12 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "updateEmployeeIdentity") {
-      requireSuperAdmin(req);
-      const id=Number(data.id),first=String(data.first||"").trim(),last=String(data.last||"").trim();
-      if(!Number.isInteger(id)||!first||!last)throw new Error("Prénom et nom obligatoires");
+      requireTeamManager(req);
+      const id=Number(data.id),first=String(data.first||"").trim(),last=String(data.last||"").trim(),currentEmployee=Number.isInteger(id)?db.prepare("SELECT role FROM employees WHERE id=?").get(id):null,role=String(data.role||currentEmployee?.role||"").trim();
+      if(!Number.isInteger(id)||!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");
       const existing=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND id<>?").get(first,last,id);
       if(existing)throw Object.assign(new Error("Un employé porte déjà ce prénom et ce nom"),{status:409});
-      const result=db.prepare("UPDATE employees SET first_name=?,last_name=? WHERE id=?").run(first,last,id);
+      const result=db.prepare("UPDATE employees SET first_name=?,last_name=?,role=? WHERE id=?").run(first,last,role,id);
       if(!result.changes)throw Object.assign(new Error("Employé introuvable"),{status:404});
       ensureEmployeeAccount(id);const updated=db.prepare("SELECT id,first_name,last_name FROM employees WHERE id=?").get(id),username=employeeUsername(updated);db.prepare("UPDATE employee_accounts SET username=? WHERE employee_id=?").run(username,id);
       return json(res,200,{success:true,username});
@@ -407,7 +439,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "getSchedule") {
-      requireSuperAdmin(req);
+      requirePlanningAdmin(req);
       const start=String(data.weekStart||""),endDate=new Date(`${start}T12:00:00`);
       if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||Number.isNaN(endDate.getTime())) throw new Error("Semaine invalide");
       endDate.setDate(endDate.getDate()+6);const end=endDate.toISOString().slice(0,10);
@@ -416,7 +448,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,blocks});
     }
     if (data.action === "ensureSalleWeek") {
-      const current=requireSuperAdmin(req),start=String(data.weekStart||""),startDate=new Date(`${start}T12:00:00Z`);
+      const current=requirePlanningAdmin(req),start=String(data.weekStart||""),startDate=new Date(`${start}T12:00:00Z`);
       if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||Number.isNaN(startDate.getTime()))throw new Error("Semaine invalide");
       const endDate=new Date(startDate);endDate.setUTCDate(endDate.getUTCDate()+6);const end=endDate.toISOString().slice(0,10),previousStartDate=new Date(startDate);previousStartDate.setUTCDate(previousStartDate.getUTCDate()-7);const previousStart=previousStartDate.toISOString().slice(0,10),previousEndDate=new Date(previousStartDate);previousEndDate.setUTCDate(previousEndDate.getUTCDate()+6);const previousEnd=previousEndDate.toISOString().slice(0,10);
       const existing=db.prepare("SELECT COUNT(*) AS value FROM schedule_blocks s JOIN employees e ON e.id=s.employee_id WHERE s.work_date BETWEEN ? AND ? AND lower(e.role) NOT LIKE '%cuisine%'").get(start,end).value;
@@ -425,7 +457,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,copied:true});
     }
     if (data.action === "toggleScheduleBlock") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes);
+      const current=requirePlanningAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes);
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isInteger(startMinutes)||startMinutes<420||startMinutes>1560||startMinutes%30) throw new Error("Créneau invalide");
       if(startMinutes===1560){const service=String(data.service||"soir"),existing=db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employeeId,workDate,service);if(existing)db.prepare("DELETE FROM schedule_closings WHERE id=?").run(existing.id);else db.prepare("INSERT INTO schedule_closings(employee_id,work_date,service,created_by) VALUES(?,?,?,?)").run(employeeId,workDate,service,current.id);return json(res,200,{success:true,selected:!existing});}
       const existing=db.prepare("SELECT id FROM schedule_blocks WHERE employee_id=? AND work_date=? AND start_minutes=?").get(employeeId,workDate,startMinutes);
@@ -434,7 +466,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,selected:!existing});
     }
     if (data.action === "setScheduleRange") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes),endMinutes=Number(data.endMinutes),service=String(data.service||"matin"),closing=Boolean(data.closing);
+      const current=requirePlanningAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),startMinutes=Number(data.startMinutes),endMinutes=Number(data.endMinutes),service=String(data.service||"matin"),closing=Boolean(data.closing);
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!Number.isInteger(startMinutes)||!Number.isInteger(endMinutes)||startMinutes<420||startMinutes>=1560||endMinutes<=startMinutes||endMinutes>1560||startMinutes%30||endMinutes%30) throw new Error("La plage doit utiliser des créneaux de 30 minutes entre 07:00 et 02:00");
       if(!["matin","soir"].includes(service))throw new Error("Service de planning invalide");
       if(!db.prepare("SELECT id FROM employees WHERE id=? AND active=1").get(employeeId)) throw Object.assign(new Error("Employé introuvable"),{status:404});
@@ -450,7 +482,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "setScheduleBlockRange") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),first=Number(data.startMinutes),last=Number(data.endMinutes),startMinutes=Math.min(first,last),endMinutes=Math.max(first,last),requestedService=String(data.service||""),service=["matin","soir"].includes(requestedService)?requestedService:null;
+      const current=requirePlanningAdmin(req),employeeId=Number(data.employeeId),workDate=String(data.workDate||""),first=Number(data.startMinutes),last=Number(data.endMinutes),startMinutes=Math.min(first,last),endMinutes=Math.max(first,last),requestedService=String(data.service||""),service=["matin","soir"].includes(requestedService)?requestedService:null;
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||startMinutes<420||endMinutes>1560||startMinutes%30||endMinutes%30)throw new Error("Plage de planning invalide");
       if(endMinutes===1560&&service&&service!=="soir")throw new Error("La fermeture peut uniquement être utilisée pour le service du soir");
       const includesClosing=endMinutes===1560,blockEnd=includesClosing?1530:endMinutes,values=[];for(let minutes=startMinutes;minutes<=blockEnd;minutes+=30)values.push(minutes);
@@ -459,7 +491,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,removed:remove});
     }
     if (data.action === "setWeeklySchedule") {
-      const current=requireSuperAdmin(req),employeeId=Number(data.employeeId),weekStart=String(data.weekStart||""),entries=Array.isArray(data.entries)?data.entries:[];
+      const current=requirePlanningAdmin(req),employeeId=Number(data.employeeId),weekStart=String(data.weekStart||""),entries=Array.isArray(data.entries)?data.entries:[];
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)||!db.prepare("SELECT id FROM employees WHERE id=? AND active=1").get(employeeId))throw new Error("Employé ou semaine invalide");
       const startDate=new Date(`${weekStart}T12:00:00Z`),dates=Array.from({length:7},(_,index)=>{const date=new Date(startDate);date.setUTCDate(date.getUTCDate()+index);return date.toISOString().slice(0,10)}),allowedDates=new Set(dates);
       const cleaned=entries.map(entry=>({workDate:String(entry.workDate||""),service:String(entry.service||""),startMinutes:Number(entry.startMinutes),endMinutes:Number(entry.endMinutes),closing:Boolean(entry.closing)})).filter(entry=>allowedDates.has(entry.workDate)&&["matin","soir"].includes(entry.service));
@@ -468,7 +500,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "deleteScheduleService") {
-      requireSuperAdmin(req);const employeeId=Number(data.employeeId),workDate=String(data.workDate||""),service=String(data.service||"");
+      requirePlanningAdmin(req);const employeeId=Number(data.employeeId),workDate=String(data.workDate||""),service=String(data.service||"");
       if(!Number.isInteger(employeeId)||!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!["matin","soir"].includes(service))throw new Error("Service de planning invalide");
       db.exec("BEGIN");try{db.prepare("DELETE FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").run(employeeId,workDate,service);db.prepare("DELETE FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").run(employeeId,workDate,service);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
       return json(res,200,{success:true});

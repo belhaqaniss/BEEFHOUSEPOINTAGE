@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import SuperAdminDashboard from "./SuperAdminDashboard";
 import HyperAdminDashboard from "./HyperAdminDashboard";
+import ResponsableDashboard from "./ResponsableDashboard";
 import TipDashboard from "./TipDashboard";
 import OrderSplitDashboard from "./OrderSplitDashboard";
 import EmployeePortal from "./EmployeePortal";
@@ -18,16 +19,17 @@ import { downloadDailyDetailsPdf, type DailyDetail, type DailyEntry } from "./da
 type Person={first:string;last:string;role:string;color:string};
 type AttendanceRecord={id:number;name:string;type:"Arrivée"|"Départ";timestamp:string;workDate:string;service?:"matin"|"soir";scheduledStartMinutes:number|null;scheduledMorningStartMinutes?:number|null;scheduledEveningStartMinutes?:number|null};
 type AttendancePair={name:string;index:number;arrival?:AttendanceRecord;departure?:AttendanceRecord};
+type AppTab="pointage"|"qr"|"commande"|"details"|"hours"|"pourboire"|"responsable"|"superadmin"|"hyperadmin";
 const defaultPeople:Person[]=[
  {first:"Amélie",last:"Martin",role:"Accueil",color:"coral"},{first:"Amine",last:"Bensaïd",role:"Caisse",color:"purple"},{first:"Ambre",last:"Dupont",role:"Service",color:"blue"},{first:"Camille",last:"Robert",role:"Caisse",color:"green"},{first:"Lucas",last:"Bernard",role:"Service",color:"amber"},{first:"Sarah",last:"Petit",role:"Accueil",color:"pink"},{first:"Aniss",last:"Belhaq",role:"Salle",color:"blue"}
 ];
 const storedAuth=(key:string)=>localStorage.getItem(key)||sessionStorage.getItem(key);
 const api=async(data:object)=>{const token=storedAuth("presence-token");const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(data)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result?.success===false)throw new Error(result.message||"Erreur du serveur");return result;};
-const tabForRole=(role:string):"qr"|"superadmin"|"hyperadmin"=>role==="hyperadmin"?"hyperadmin":role==="superadmin"?"superadmin":"qr";
+const tabForRole=(role:string):AppTab=>role==="hyperadmin"?"hyperadmin":role==="superadmin"?"superadmin":role==="responsable"?"pointage":"qr";
 
 function AdminApp(){
  const[loggedIn,setLoggedIn]=useState(false),[login,setLogin]=useState({username:"",password:""}),[loginError,setLoginError]=useState(""),[showPassword,setShowPassword]=useState(false);
- const[tab,setTab]=useState<"pointage"|"qr"|"commande"|"details"|"hours"|"pourboire"|"superadmin"|"hyperadmin">(()=>tabForRole(storedAuth("presence-role")||"admin")),[search,setSearch]=useState(""),[person,setPerson]=useState<Person|null>(null),[sign,setSign]=useState(""),[mode,setMode]=useState("Arrivée"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[adminRole,setAdminRole]=useState(storedAuth("presence-role")||"admin");
+ const[tab,setTab]=useState<AppTab>(()=>tabForRole(storedAuth("presence-role")||"admin")),[search,setSearch]=useState(""),[person,setPerson]=useState<Person|null>(null),[sign,setSign]=useState(""),[mode,setMode]=useState("Arrivée"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[adminRole,setAdminRole]=useState(storedAuth("presence-role")||"admin");
  const[form,setForm]=useState({cashierMorning:"",cashierEvening:"",fdcMorning:"",fdcEvening:"",fdcFinal:"",cbAmount:"",cashAmount:"",totalAmount:""});
  const[detailEntries,setDetailEntries]=useState<DailyEntry[]>([]),[entryForm,setEntryForm]=useState<DailyEntry>({kind:"depense",label:"",amount:0,note:""});
  const today=()=>new Date().toLocaleDateString("en-CA");
@@ -59,12 +61,13 @@ function AdminApp(){
  return <main>
   <header><div className="brand"><b>P</b></div><div className="header-actions"><div className="date"><i/>{new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"long"}).format(now)}</div><button className="logout" onClick={logout}>Déconnexion</button></div></header>
   <section className="shell">
-   <div className="hero"><label>{tab==="superadmin"?"SUPER ADMINISTRATION":"ESPACE ÉQUIPE"}</label><p>{tab==="pointage"?"Recherchez votre nom, signez, puis validez votre passage.":tab==="qr"?"Affichez le QR dynamique que les employés scannent avec leur téléphone.":tab==="commande"?"Répartissez les consommations et suivez les règlements ESP ou CB.":tab==="details"?"Renseignez les caisses, dépenses et offerts de la journée.":tab==="hours"?"Consultez, corrigez et exportez les horaires des employés.":tab==="pourboire"?"Répartissez les pourboires et suivez les parts non récupérées.":"Une vue claire sur l’équipe, les accès et l’activité BEEF HOUSE."}</p></div>
+   <div className="hero"><label>{adminRole==="responsable"?"ESPACE RESPONSABLE":tab==="superadmin"?"SUPER ADMINISTRATION":"ESPACE ÉQUIPE"}</label><p>{tab==="pointage"?"Recherchez votre nom, signez, puis validez votre passage.":tab==="qr"?"Affichez le QR dynamique que les employés scannent avec leur téléphone.":tab==="commande"?"Répartissez les consommations et suivez les règlements ESP ou CB.":tab==="details"?"Renseignez les caisses, dépenses et offerts de la journée.":tab==="hours"?"Consultez, corrigez et exportez les horaires des employés.":tab==="pourboire"?"Répartissez les pourboires et suivez les parts non récupérées.":tab==="responsable"?"Organisez le planning et gérez les employés.":"Une vue claire sur l’équipe, les accès et l’activité BEEF HOUSE."}</p></div>
    {adminRole==="admin"&&<nav className="admin-nav"><button className={tab==="qr"?"active":""} onClick={()=>{setTab("qr");setMessage("")}}>⌗ &nbsp; Pointage QR</button><button className={tab==="pointage"?"active":""} onClick={()=>{setTab("pointage");setMessage("")}}>✓ &nbsp; Pointage</button><button className={tab==="commande"?"active":""} onClick={()=>{setTab("commande");setMessage("")}}>÷ &nbsp; Commande</button><button className={tab==="details"?"active":""} onClick={()=>{setTab("details");setMessage("")}}>≡ &nbsp; Détail journalier</button><button className={tab==="hours"?"active":""} onClick={()=>{setTab("hours");setMessage("")}}>◷ &nbsp; Heures employés</button><button className={tab==="pourboire"?"active":""} onClick={()=>{setTab("pourboire");setMessage("")}}>€ &nbsp; Pourboire</button></nav>}
+   {adminRole==="responsable"&&<nav className="admin-nav responsable-nav"><button className={tab==="pointage"?"active":""} onClick={()=>{setTab("pointage");setMessage("")}}>✓ &nbsp; Pointage classique</button><button className={tab==="responsable"?"active":""} onClick={()=>{setTab("responsable");setMessage("")}}>▦ &nbsp; Planning &amp; employés</button></nav>}
    {message&&<div className="message">✓ &nbsp; {message}<button onClick={()=>setMessage("")}>×</button></div>}
    {tab==="pointage"?<div className="grid">
-    <section className="card"><div className="cardhead"><span>1</span><div><h2>Trouvez votre nom</h2><p>Tapez les premières lettres de votre prénom.</p></div><div className="team-actions"><small>{team.length} personnes</small><button onClick={()=>setManaging(!managing)}>{managing?"Fermer":"＋ Gérer"}</button></div></div>
-     {managing&&<div className="team-manager"><form onSubmit={addPerson}><input required value={newPerson.first} onChange={e=>setNewPerson({...newPerson,first:e.target.value})} placeholder="Prénom"/><input required value={newPerson.last} onChange={e=>setNewPerson({...newPerson,last:e.target.value})} placeholder="Nom"/><input required value={newPerson.role} onChange={e=>setNewPerson({...newPerson,role:e.target.value})} placeholder="Poste"/><button>Ajouter</button></form></div>}
+     <section className="card"><div className="cardhead"><span>1</span><div><h2>Trouvez votre nom</h2><p>Tapez les premières lettres de votre prénom.</p></div><div className="team-actions"><small>{team.length} personnes</small>{adminRole==="admin"&&<button onClick={()=>setManaging(!managing)}>{managing?"Fermer":"＋ Gérer"}</button>}</div></div>
+      {adminRole==="admin"&&managing&&<div className="team-manager"><form onSubmit={addPerson}><input required value={newPerson.first} onChange={e=>setNewPerson({...newPerson,first:e.target.value})} placeholder="Prénom"/><input required value={newPerson.last} onChange={e=>setNewPerson({...newPerson,last:e.target.value})} placeholder="Nom"/><input required value={newPerson.role} onChange={e=>setNewPerson({...newPerson,role:e.target.value})} placeholder="Poste"/><button>Ajouter</button></form></div>}
      <label className="search">⌕<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Ex. AM pour Amélie, Amine..."/><kbd>A—Z</kbd></label>
      <div className="list">{filtered.map(p=><button key={`${p.first}-${p.last}`} className={`person ${person?.first===p.first&&person?.last===p.last?"selected":""}`} onClick={()=>{setPerson(p);setSign("")}}><b className={p.color}>{p.first[0]}{p.last[0]}</b><span><strong>{p.first} {p.last}</strong><small>{p.role}</small></span><i>{person?.first===p.first&&person?.last===p.last?"✓":""}</i></button>)}{search.trim()&&!filtered.length&&<p className="empty">Aucun nom trouvé.</p>}{!search.trim()&&<p className="empty">Commencez à écrire votre prénom pour afficher les résultats.</p>}</div>
     </section>
@@ -102,7 +105,7 @@ function AdminApp(){
         </div>):<p>Aucun pointage pour cette date.</p>}
       </div>
     </section>
-   </div>:tab==="pourboire"?<TipDashboard/>:tab==="hyperadmin"?<HyperAdminDashboard/>:<SuperAdminDashboard/>}
+   </div>:tab==="pourboire"?<TipDashboard/>:tab==="hyperadmin"?<HyperAdminDashboard/>:tab==="responsable"?<ResponsableDashboard request={api}/>:<SuperAdminDashboard/>}
   </section><footer><b>Présence</b><span>Pointage simple, équipe sereine.</span><small><i/> Synchronisation Google prête</small></footer>
  </main>
 }

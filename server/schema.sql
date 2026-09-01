@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS admins (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'superadmin')),
+  role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'superadmin', 'responsable')),
   restaurant_id INTEGER REFERENCES restaurants(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
