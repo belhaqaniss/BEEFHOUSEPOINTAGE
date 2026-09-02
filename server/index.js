@@ -130,6 +130,7 @@ const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS l
 const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(timestamp)),part=type=>parts.find(item=>item.type===type)?.value;return `${part("year")}-${part("month")}-${part("day")}`};
 const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
+const pointageService=timestamp=>parisHour(timestamp)>=15?"soir":"matin";
 const EMPLOYEE_HOURS_START="2026-09-01";
 const employeeAccumulatedMinutes=(employeeId,endDate)=>{
   if(endDate<EMPLOYEE_HOURS_START)return 0;
@@ -152,7 +153,9 @@ const employeeAccumulatedMinutes=(employeeId,endDate)=>{
   }
   return Math.round(totalMs/60_000);
 };
-const nextPointageService=(employeeId,workDate,timestamp)=>{const scheduled=db.prepare("SELECT service,MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? GROUP BY service ORDER BY startMinutes").all(employeeId,workDate),arrived=new Set(db.prepare("SELECT service FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").all(employeeId,workDate).map(row=>row.service)),available=scheduled.filter(item=>!arrived.has(item.service));let selected;if(available.length===1)selected=available[0];else if(available.length>1){const now=parisMinutes(timestamp);selected=[...available].sort((a,b)=>Math.abs(a.startMinutes-now)-Math.abs(b.startMinutes-now))[0];}else{const count=db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE employee_id=? AND work_date=? AND type='Arrivée'").get(employeeId,workDate).value;selected={service:count>=1?"soir":"matin",startMinutes:null};}return {service:selected.service,scheduledStartMinutes:selected.startMinutes??null};};
+const nextPointageService=(employeeId,workDate,timestamp)=>{const service=pointageService(timestamp),scheduled=db.prepare("SELECT MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employeeId,workDate,service);return {service,scheduledStartMinutes:scheduled?.startMinutes??null};};
+const normalizeAttendanceServices=()=>{const rows=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type,timestamp,service FROM attendance ORDER BY employee_id,work_date,timestamp,id").all(),open=new Map(),update=db.prepare("UPDATE attendance SET service=? WHERE id=?");db.exec("BEGIN");try{for(const row of rows){const key=`${row.employeeId}:${row.workDate}`,stack=open.get(key)||[];if(row.type==="Arrivée"){const service=pointageService(row.timestamp);stack.push(service);open.set(key,stack);if(row.service!==service)update.run(service,row.id)}else{const service=stack.pop()||row.service||"matin";if(stack.length)open.set(key,stack);else open.delete(key);if(row.service!==service)update.run(service,row.id)}}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}};
+normalizeAttendanceServices();
 const tipOverview = workDate => {
   const day=db.prepare("SELECT work_date AS workDate,morning_cents/100.0 AS morningAmount,evening_cents/100.0 AS eveningAmount FROM tip_days WHERE work_date=?").get(workDate)||{workDate,morningAmount:0,eveningAmount:0};
   const allocations=db.prepare("SELECT id,work_date AS workDate,service,recipient_key AS recipientKey,recipient_name AS recipientName,amount_cents/100.0 AS amount,claimed,claimed_at AS claimedAt,(SELECT COALESCE(SUM(other.amount_cents),0)/100.0 FROM tip_allocations other WHERE other.recipient_key=tip_allocations.recipient_key AND other.claimed=0) AS accumulated FROM tip_allocations WHERE work_date=? ORDER BY service,recipient_name").all(workDate).map(row=>({...row,claimed:Boolean(row.claimed)}));
@@ -352,8 +355,13 @@ const server = createServer(async (req, res) => {
       requireOperationalAdmin(req);
       const id=Number(data.id),timestamp=String(data.timestamp||""),parsed=new Date(timestamp);
       if(!Number.isInteger(id)||Number.isNaN(parsed.getTime())) throw new Error("Heure de pointage invalide");
-      const result=db.prepare("UPDATE attendance SET timestamp=? WHERE id=?").run(parsed.toISOString(),id);
-      if(!result.changes) throw Object.assign(new Error("Pointage introuvable"),{status:404});
+      const record=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type,timestamp,service FROM attendance WHERE id=?").get(id);
+      if(!record) throw Object.assign(new Error("Pointage introuvable"),{status:404});
+      if(record.type==="Arrivée"){
+        const departure=db.prepare("SELECT id,timestamp FROM attendance WHERE employee_id=? AND work_date=? AND service=? AND type='Départ' AND (timestamp>? OR (timestamp=? AND id>?)) ORDER BY timestamp,id LIMIT 1").get(record.employeeId,record.workDate,record.service,record.timestamp,record.timestamp,record.id),service=pointageService(parsed.toISOString());
+        if(departure&&parsed.getTime()>=new Date(departure.timestamp).getTime())throw new Error("L’arrivée doit être antérieure au départ");
+        db.exec("BEGIN");try{db.prepare("UPDATE attendance SET timestamp=?,service=? WHERE id=?").run(parsed.toISOString(),service,id);if(departure)db.prepare("UPDATE attendance SET service=? WHERE id=?").run(service,departure.id);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      }else db.prepare("UPDATE attendance SET timestamp=? WHERE id=?").run(parsed.toISOString(),id);
       return json(res,200,{success:true});
     }
     if (data.action === "addManualDeparture") {
