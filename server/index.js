@@ -333,19 +333,20 @@ const server = createServer(async (req, res) => {
       const staff=db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
       const events=db.prepare("SELECT a.employee_id AS employeeId,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a WHERE substr(a.work_date,1,7)=? ORDER BY a.employee_id,a.work_date,a.timestamp,a.id").all(month);
       const employees=staff.map(employee=>{
-        const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map();let totalMs=0,shifts=0;
+        const own=events.filter(event=>event.employeeId===employee.id),openByDate=new Map();let morningMs=0,eveningMs=0,shifts=0;
         for(const event of own){
           if(event.type==="Arrivée"){
             openByDate.set(`${event.workDate}:${event.service}`,new Date(event.timestamp));
           } else {
             const key=`${event.workDate}:${event.service}`,start=openByDate.get(key),end=new Date(event.timestamp);
-            if(start&&!Number.isNaN(end.getTime())){const day=24*60*60*1000,difference=end.getTime()-start.getTime();totalMs+=((difference%day)+day)%day;shifts++;openByDate.delete(key);}
+            if(start&&!Number.isNaN(end.getTime())){const day=24*60*60*1000,difference=end.getTime()-start.getTime(),duration=((difference%day)+day)%day;if(event.service==="soir")eveningMs+=duration;else morningMs+=duration;shifts++;openByDate.delete(key);}
           }
         }
-        const totalMinutes=Math.round(totalMs/60000);
-        return {...employee,totalMinutes,shifts,days:new Set(own.map(event=>event.workDate)).size};
+        const morningMinutes=Math.round(morningMs/60000),eveningMinutes=Math.round(eveningMs/60000),totalMinutes=morningMinutes+eveningMinutes;
+        return {...employee,morningMinutes,eveningMinutes,totalMinutes,shifts,days:new Set(own.map(event=>event.workDate)).size};
       });
-      return json(res,200,{success:true,month,employees,totalMinutes:employees.reduce((sum,employee)=>sum+employee.totalMinutes,0)});
+      const morningMinutes=employees.reduce((sum,employee)=>sum+employee.morningMinutes,0),eveningMinutes=employees.reduce((sum,employee)=>sum+employee.eveningMinutes,0);
+      return json(res,200,{success:true,month,employees,morningMinutes,eveningMinutes,totalMinutes:morningMinutes+eveningMinutes});
     }
     if (data.action === "updateAttendance") {
       requireOperationalAdmin(req);
