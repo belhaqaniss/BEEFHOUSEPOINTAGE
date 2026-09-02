@@ -189,6 +189,17 @@ const server = createServer(async (req, res) => {
     if(data.action==="employeeLogout"){
       const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");if(token)db.prepare("DELETE FROM employee_sessions WHERE token=?").run(token);return json(res,200,{success:true});
     }
+    if(data.action==="employeeChangePassword"){
+      const employee=requireEmployee(req),currentPassword=String(data.currentPassword||""),newPassword=String(data.newPassword||""),token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""),account=db.prepare("SELECT password_hash AS passwordHash,password_salt AS passwordSalt FROM employee_accounts WHERE employee_id=?").get(employee.id);
+      if(!account)throw Object.assign(new Error("Compte employé introuvable"),{status:404});
+      if(newPassword.length<4||newPassword.length>128)throw new Error("Le nouveau mot de passe doit contenir entre 4 et 128 caractères");
+      if(currentPassword===newPassword)throw new Error("Choisissez un mot de passe différent de l’ancien");
+      const given=Buffer.from(hashPassword(currentPassword,account.passwordSalt),"hex"),expected=Buffer.from(account.passwordHash,"hex");
+      if(given.length!==expected.length||!timingSafeEqual(given,expected))throw Object.assign(new Error("L’ancien mot de passe est incorrect"),{status:401});
+      const salt=randomBytes(16).toString("hex");
+      db.exec("BEGIN");try{db.prepare("UPDATE employee_accounts SET password_hash=?,password_salt=? WHERE employee_id=?").run(hashPassword(newPassword,salt),salt,employee.id);db.prepare("DELETE FROM employee_sessions WHERE employee_id=? AND token<>?").run(employee.id,token);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
+      return json(res,200,{success:true});
+    }
     if(data.action==="employeeDashboard"){
       const employee=requireEmployee(req),now=new Date().toISOString(),today=parisDate(now),lastEvent=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
       const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);

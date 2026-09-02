@@ -1,0 +1,132 @@
+.employee-security-card {
+  margin-top: 20px;
+  padding: 22px;
+  border: 1px solid #e2e0dc;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 12px 35px #35312b0c;
+}
+
+.employee-security-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.employee-security-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.employee-security-heading small {
+  color: #b51f2a;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.employee-security-heading h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.employee-security-heading p {
+  margin: 0;
+  color: #7d828c;
+  font-size: 9px;
+}
+
+.employee-security-heading > button,
+.employee-password-visibility {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid #ead9d7;
+  border-radius: 9px;
+  background: #fff7f6;
+  color: #a91f29;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.employee-security-card form {
+  margin-top: 20px;
+  padding-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 13px;
+  border-top: 1px solid #eee;
+}
+
+.employee-security-card form label {
+  display: grid;
+  gap: 6px;
+  color: #555b66;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.employee-security-card form input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #dfe0e4;
+  border-radius: 10px;
+  outline: none;
+  font-size: 13px;
+}
+
+.employee-security-card form input:focus {
+  border-color: #b51f2a;
+  box-shadow: 0 0 0 3px #b51f2a12;
+}
+
+.employee-password-visibility {
+  justify-self: start;
+}
+
+.employee-security-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 9px;
+}
+
+.employee-security-actions .employee-primary {
+  padding: 0 18px;
+}
+
+.employee-security-actions > button:last-child {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid #dedfe3;
+  border-radius: 11px;
+  background: #fff;
+  color: #6f747e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+@media (max-width: 700px) {
+  .employee-security-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .employee-security-heading > button {
+    width: 100%;
+  }
+
+  .employee-security-card form {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-security-actions {
+    grid-column: auto;
+    flex-direction: column;
+  }
+
+  .employee-security-actions > button {
+    width: 100%;
+  }
+}

@@ -53,6 +53,10 @@ export default function EmployeePortal() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
   const qrToken = useMemo(() => new URLSearchParams(window.location.search).get("scan") || "", []);
 
   const load = async (token = employeeToken) => {
@@ -130,6 +134,32 @@ export default function EmployeePortal() {
     setDashboard(null);
   };
 
+  const changePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (passwordForm.next !== passwordForm.confirm) {
+      setError("La confirmation ne correspond pas au nouveau mot de passe.");
+      return;
+    }
+    if (passwordForm.next.length < 4) {
+      setError("Le nouveau mot de passe doit contenir au moins 4 caractères.");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await request({ action: "employeeChangePassword", currentPassword: passwordForm.current, newPassword: passwordForm.next }, employeeToken);
+      setPasswordForm({ current: "", next: "", confirm: "" });
+      setPasswordVisible(false);
+      setPasswordOpen(false);
+      setMessage("Votre mot de passe a été modifié avec succès.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Modification du mot de passe impossible");
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
   const submit = async () => {
     if (!signature || !scanToken) return;
     setBusy(true);
@@ -205,6 +235,10 @@ export default function EmployeePortal() {
         <section className="employee-dashboard-grid">
           <article><h2>Mon prochain planning</h2>{dashboard?.schedule.length ? dashboard.schedule.map((item, index) => <div className="employee-schedule" key={`${item.workDate}-${item.service}-${index}`}><span>{new Date(`${item.workDate}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit" })}</span><b>{item.service}</b><strong>{time(item.startMinutes)} – {item.closing ? "FERMETURE" : time(item.endMinutes)}</strong></div>) : <p>Aucun horaire programmé.</p>}</article>
           <article><h2>Mes derniers pointages</h2>{dashboard?.history.length ? dashboard.history.slice(0, 8).map((item, index) => <div className="employee-history" key={`${item.timestamp}-${index}`}><span className={item.type === "Arrivée" ? "in" : "out"}>{item.type === "Arrivée" ? "↘" : "↗"}</span><div><b>{item.type} · {item.service}</b><small>{new Date(item.timestamp).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small></div></div>) : <p>Aucun pointage enregistré.</p>}</article>
+        </section>
+        <section className="employee-security-card">
+          <div className="employee-security-heading"><div><small>SÉCURITÉ DU COMPTE</small><h2>Mot de passe</h2><p>Modifiez votre mot de passe personnel depuis cet appareil.</p></div>{!passwordOpen&&<button type="button" onClick={()=>setPasswordOpen(true)}>Modifier mon mot de passe</button>}</div>
+          {passwordOpen&&<form onSubmit={changePassword}><label>Ancien mot de passe<input required autoComplete="current-password" type={passwordVisible?"text":"password"} value={passwordForm.current} onChange={event=>setPasswordForm({...passwordForm,current:event.target.value})}/></label><label>Nouveau mot de passe<input required minLength={4} maxLength={128} autoComplete="new-password" type={passwordVisible?"text":"password"} value={passwordForm.next} onChange={event=>setPasswordForm({...passwordForm,next:event.target.value})}/></label><label>Confirmer le nouveau mot de passe<input required minLength={4} maxLength={128} autoComplete="new-password" type={passwordVisible?"text":"password"} value={passwordForm.confirm} onChange={event=>setPasswordForm({...passwordForm,confirm:event.target.value})}/></label><button className="employee-password-visibility" type="button" onClick={()=>setPasswordVisible(value=>!value)}>{passwordVisible?"Masquer les mots de passe":"Afficher les mots de passe"}</button><div className="employee-security-actions"><button className="employee-primary" disabled={passwordBusy}>{passwordBusy?"Modification…":"Enregistrer le mot de passe"}</button><button type="button" disabled={passwordBusy} onClick={()=>{setPasswordOpen(false);setPasswordVisible(false);setPasswordForm({current:"",next:"",confirm:""})}}>Annuler</button></div></form>}
         </section>
       </section>
       {camera}
