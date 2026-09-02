@@ -128,7 +128,7 @@ const employeeFromRequest=req=>{
 const requireEmployee=req=>{const employee=employeeFromRequest(req);if(!employee)throw Object.assign(new Error("Session employé requise"),{status:401});return employee};
 const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
 const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(timestamp)),part=type=>parts.find(item=>item.type===type)?.value;return `${part("year")}-${part("month")}-${part("day")}`};
-const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).format(new Date(timestamp)));
+const parisHour=timestamp=>Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)).find(part=>part.type==="hour")?.value||0);
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
 const pointageService=timestamp=>parisHour(timestamp)>=15?"soir":"matin";
 const EMPLOYEE_HOURS_START="2026-09-01";
