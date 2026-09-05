@@ -22,9 +22,10 @@
   font-size: 24px;
 }
 
-.employee-hours-total > div:last-child {
+.employee-hours-value {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .employee-hours-total small {
@@ -46,9 +47,31 @@
   font-size: 9px;
 }
 
+.employee-hours-month {
+  display: grid;
+  gap: 5px;
+  margin-left: auto;
+  color: #7c818b;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.employee-hours-month input {
+  min-width: 150px;
+  padding: 9px 11px;
+  border: 1px solid #dfc9c7;
+  border-radius: 10px;
+  background: #fff;
+  color: #202532;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 @media (max-width: 700px) {
   .employee-hours-total {
     align-items: flex-start;
+    flex-wrap: wrap;
     padding: 17px;
   }
 
@@ -60,5 +83,15 @@
 
   .employee-hours-total strong {
     font-size: 24px;
+  }
+
+  .employee-hours-month {
+    width: 100%;
+    margin-left: 62px;
+  }
+
+  .employee-hours-month input {
+    width: 100%;
+    min-width: 0;
   }
 }

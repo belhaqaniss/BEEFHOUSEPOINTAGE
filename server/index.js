@@ -131,10 +131,8 @@ const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZon
 const parisHour=timestamp=>Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)).find(part=>part.type==="hour")?.value||0);
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
 const pointageService=timestamp=>parisHour(timestamp)>=13?"soir":"matin";
-const EMPLOYEE_HOURS_START="2026-09-01";
-const employeeAccumulatedMinutes=(employeeId,endDate)=>{
-  if(endDate<EMPLOYEE_HOURS_START)return 0;
-  const events=db.prepare("SELECT a.type,a.timestamp,a.work_date AS workDate FROM attendance a WHERE a.employee_id=? AND a.work_date BETWEEN ? AND ? ORDER BY a.work_date,a.timestamp,a.id").all(employeeId,EMPLOYEE_HOURS_START,endDate),open=new Map();
+const employeeMonthlyMinutes=(employeeId,month)=>{
+  const events=db.prepare("SELECT a.type,a.timestamp,a.work_date AS workDate FROM attendance a WHERE a.employee_id=? AND substr(a.work_date,1,7)=? ORDER BY a.work_date,a.timestamp,a.id").all(employeeId,month),open=new Map();
   let totalMs=0;
   for(const event of events){
     const key=event.workDate;
@@ -202,10 +200,12 @@ const server = createServer(async (req, res) => {
     }
     if(data.action==="employeeDashboard"){
       const employee=requireEmployee(req),now=new Date().toISOString(),today=parisDate(now),lastEvent=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null;
+      const selectedMonth=String(data.month||today.slice(0,7));
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth))throw new Error("Mois invalide");
       const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);
       const endDate=new Date(`${today}T12:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+7);const schedule=db.prepare("SELECT work_date AS workDate,service,MIN(start_minutes) AS startMinutes,MAX(start_minutes)+30 AS endMinutes FROM schedule_blocks WHERE employee_id=? AND work_date BETWEEN ? AND ? GROUP BY work_date,service ORDER BY work_date,startMinutes").all(employee.id,today,endDate.toISOString().slice(0,10)).map(row=>({...row,closing:Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,row.workDate,row.service))}));
-      const accumulatedMinutes=employeeAccumulatedMinutes(employee.id,today);
-      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedSince:EMPLOYEE_HOURS_START});
+      const accumulatedMinutes=employeeMonthlyMinutes(employee.id,selectedMonth);
+      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedMonth:selectedMonth});
     }
     if(data.action==="employeePointage"){
       const employee=requireEmployee(req),signature=String(data.signature||""),scanHash=hashToken(data.scanToken),now=new Date().toISOString();

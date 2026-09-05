@@ -10,7 +10,7 @@ type Dashboard = {
   history: { type: string; timestamp: string; service: string; workDate: string }[];
   schedule: { workDate: string; service: string; startMinutes: number; endMinutes: number; closing: boolean }[];
   accumulatedMinutes: number;
-  accumulatedSince: string;
+  accumulatedMonth: string;
 };
 
 const request = async (data: object, token = "") => {
@@ -31,6 +31,14 @@ const request = async (data: object, token = "") => {
 };
 
 const time = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+const currentParisMonth = () => {
+  const parts = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit" }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}`;
+};
+
+const monthLabel = (month: string) => new Date(`${month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 
 const tokenFromQrValue = (value: string) => {
   const cleanValue = value.trim();
@@ -57,12 +65,13 @@ export default function EmployeePortal() {
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [hoursMonth, setHoursMonth] = useState(currentParisMonth);
   const qrToken = useMemo(() => new URLSearchParams(window.location.search).get("scan") || "", []);
 
-  const load = async (token = employeeToken) => {
+  const load = async (token = employeeToken, month = hoursMonth) => {
     if (!token) return;
     try {
-      setDashboard(await request({ action: "employeeDashboard" }, token));
+      setDashboard(await request({ action: "employeeDashboard", month }, token));
       setError("");
     } catch (reason) {
       localStorage.removeItem("employee-token");
@@ -100,8 +109,8 @@ export default function EmployeePortal() {
   }, [activateQr]);
 
   useEffect(() => {
-    if (employeeToken) void load(employeeToken);
-  }, [employeeToken]);
+    if (employeeToken) void load(employeeToken, hoursMonth);
+  }, [employeeToken, hoursMonth]);
 
   useEffect(() => {
     if (qrToken) void activateQr(qrToken);
@@ -172,7 +181,7 @@ export default function EmployeePortal() {
       setScanExpires("");
       setSignature("");
       setMessage(`${result.mode} enregistrée avec succès · service ${result.service}.`);
-      await load(employeeToken);
+      await load(employeeToken, hoursMonth);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Pointage impossible");
     } finally {
@@ -212,7 +221,7 @@ export default function EmployeePortal() {
       <header className="employee-header"><div><b>BEEF HOUSE</b><span>Espace Employé</span></div><button onClick={logout}>Déconnexion</button></header>
       <section className="employee-shell">
         <div className="employee-welcome"><div><small>COMPTE PERSONNEL</small><h1>{dashboard?.employee.first} {dashboard?.employee.last}</h1><p>{dashboard?.employee.role} · @{dashboard?.employee.username}</p></div><span className={dashboard?.hasOpenArrival ? "working" : "away"}>{dashboard?.hasOpenArrival ? "● Au travail" : "○ Non pointé"}</span></div>
-        <section className="employee-hours-total"><div className="employee-hours-icon">◷</div><div><small>HEURES ACCUMULÉES</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>Comptabilisées depuis le 1er septembre 2026 · services terminés uniquement</p></div></section>
+        <section className="employee-hours-total"><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>Services terminés en {monthLabel(dashboard?.accumulatedMonth || hoursMonth)}</p></div><label className="employee-hours-month">Choisir le mois<input type="month" value={hoursMonth} onChange={(event) => setHoursMonth(event.target.value || currentParisMonth())}/></label></section>
         {message && <div className="employee-success">{message}</div>}
         {error && <div className="employee-error">{error}</div>}
         {scanValid ? (
