@@ -47,25 +47,32 @@
   font-size: 9px;
 }
 
-.employee-hours-month {
-  display: grid;
-  gap: 5px;
+.employee-month-arrow {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 46px;
   margin-left: auto;
-  color: #7c818b;
-  font-size: 9px;
-  font-weight: 800;
+  border: 1px solid #dfc9c7;
+  border-radius: 12px;
+  background: #fff;
+  color: #b51f2a;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.employee-hours-month input {
-  min-width: 150px;
-  padding: 9px 11px;
-  border: 1px solid #dfc9c7;
-  border-radius: 10px;
-  background: #fff;
-  color: #202532;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
+.employee-month-arrow:first-child {
+  margin-left: 0;
+}
+
+.employee-month-arrow:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.employee-month-arrow:not(:disabled):hover {
+  border-color: #b51f2a;
+  background: #fff1ef;
 }
 
 @media (max-width: 700px) {
@@ -85,13 +92,9 @@
     font-size: 24px;
   }
 
-  .employee-hours-month {
-    width: 100%;
-    margin-left: 62px;
-  }
-
-  .employee-hours-month input {
-    width: 100%;
-    min-width: 0;
+  .employee-month-arrow {
+    flex-basis: 34px;
+    width: 34px;
+    height: 42px;
   }
 }

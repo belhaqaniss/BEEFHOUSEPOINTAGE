@@ -40,6 +40,12 @@ const currentParisMonth = () => {
 
 const monthLabel = (month: string) => new Date(`${month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 
+const moveMonth = (month: string, offset: number) => {
+  const date = new Date(`${month}-01T12:00:00`);
+  date.setMonth(date.getMonth() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
 const tokenFromQrValue = (value: string) => {
   const cleanValue = value.trim();
   try {
@@ -221,7 +227,7 @@ export default function EmployeePortal() {
       <header className="employee-header"><div><b>BEEF HOUSE</b><span>Espace Employé</span></div><button onClick={logout}>Déconnexion</button></header>
       <section className="employee-shell">
         <div className="employee-welcome"><div><small>COMPTE PERSONNEL</small><h1>{dashboard?.employee.first} {dashboard?.employee.last}</h1><p>{dashboard?.employee.role} · @{dashboard?.employee.username}</p></div><span className={dashboard?.hasOpenArrival ? "working" : "away"}>{dashboard?.hasOpenArrival ? "● Au travail" : "○ Non pointé"}</span></div>
-        <section className="employee-hours-total"><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>Services terminés en {monthLabel(dashboard?.accumulatedMonth || hoursMonth)}</p></div><label className="employee-hours-month">Choisir le mois<input type="month" value={hoursMonth} onChange={(event) => setHoursMonth(event.target.value || currentParisMonth())}/></label></section>
+        <section className="employee-hours-total"><button className="employee-month-arrow" type="button" aria-label="Mois précédent" onClick={() => setHoursMonth((month) => moveMonth(month, -1))}>‹</button><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>{monthLabel(dashboard?.accumulatedMonth || hoursMonth)} · services terminés uniquement</p></div><button className="employee-month-arrow" type="button" aria-label="Mois suivant" disabled={hoursMonth >= currentParisMonth()} onClick={() => setHoursMonth((month) => moveMonth(month, 1))}>›</button></section>
         {message && <div className="employee-success">{message}</div>}
         {error && <div className="employee-error">{error}</div>}
         {scanValid ? (
