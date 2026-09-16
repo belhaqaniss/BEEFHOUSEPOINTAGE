@@ -120,6 +120,17 @@ const requireNonResponsableAdmin = req => { const admin=requireAdmin(req); if(![
 const requirePointageAdmin = req => { const admin=requireAdmin(req); if(!["admin","responsable","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès au pointage requis"),{status:403}); return admin; };
 const requirePlanningAdmin = req => { const admin=requireAdmin(req); if(!["responsable","superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès au planning requis"),{status:403}); return admin; };
 const requireTeamManager = req => { const admin=requireAdmin(req); if(!["responsable","superadmin","hyperadmin"].includes(admin.role)) throw Object.assign(new Error("Accès à la gestion de l’équipe requis"),{status:403}); return admin; };
+const manualPointageGrants=new Map(),manualPointageAttempts=new Map();
+const adminTokenFromRequest=req=>String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
+const manualPointagePin=String(process.env.MANUAL_POINTAGE_PIN||"159159");
+const requireManualPointageAccess=(req,data)=>{
+  const admin=requirePointageAdmin(req),sessionToken=adminTokenFromRequest(req),accessToken=String(data.manualAccessToken||""),grant=manualPointageGrants.get(accessToken);
+  if(!grant||grant.sessionToken!==sessionToken||grant.expiresAt<=Date.now()){
+    if(grant)manualPointageGrants.delete(accessToken);
+    throw Object.assign(new Error("Mot de passe du pointage manuel requis"),{status:403});
+  }
+  return admin;
+};
 const employeeFromRequest=req=>{
   const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
   if(!token)return null;
@@ -232,6 +243,18 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "logout") { const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,""); if(token){db.prepare("DELETE FROM sessions WHERE token=?").run(token);db.prepare("DELETE FROM hyper_sessions WHERE token=?").run(token);} return json(res,200,{success:true}); }
     if (data.action === "session") { const current=requireAdmin(req); return json(res,200,{success:true,username:current.username,role:current.role,restaurantId:current.restaurantId}); }
+    if(data.action==="unlockManualPointage"){
+      requirePointageAdmin(req);
+      const sessionToken=adminTokenFromRequest(req),now=Date.now(),attempt=manualPointageAttempts.get(sessionToken);
+      if(attempt?.blockedUntil>now)throw Object.assign(new Error("Trop de tentatives. Réessayez dans 15 minutes."),{status:429});
+      const supplied=String(data.pin||""),validFormat=/^\d{6}$/.test(supplied),suppliedHash=createHash("sha256").update(supplied).digest(),expectedHash=createHash("sha256").update(manualPointagePin).digest(),valid=validFormat&&timingSafeEqual(suppliedHash,expectedHash);
+      if(!valid){const failures=(attempt?.failures||0)+1;manualPointageAttempts.set(sessionToken,failures>=5?{failures:0,blockedUntil:now+15*60*1000}:{failures,blockedUntil:0});throw Object.assign(new Error(failures>=5?"Trop de tentatives. Réessayez dans 15 minutes.":"Code incorrect"),{status:failures>=5?429:401});}
+      manualPointageAttempts.delete(sessionToken);
+      const manualAccessToken=randomBytes(32).toString("hex"),expiresAt=now+8*60*60*1000;
+      for(const[token,grant]of manualPointageGrants)if(grant.expiresAt<=now||grant.sessionToken===sessionToken)manualPointageGrants.delete(token);
+      manualPointageGrants.set(manualAccessToken,{sessionToken,expiresAt});
+      return json(res,200,{success:true,manualAccessToken,expiresAt:new Date(expiresAt).toISOString()});
+    }
     if(data.action==="createAttendanceQr"){
       const current=requireOperationalAdmin(req),token=randomBytes(32).toString("hex"),expiresAt=new Date(Date.now()+20_000).toISOString();
       db.prepare("DELETE FROM attendance_qr_challenges WHERE expires_at<?").run(new Date(Date.now()-5*60*1000).toISOString());
@@ -254,7 +277,7 @@ const server = createServer(async (req, res) => {
     if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue"));const employee=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").get(first,last);const username=ensureEmployeeAccount(employee.id); return json(res,200,{success:true,username,employees:employees()}); }
     if (data.action === "deleteEmployee") { requireTeamManager(req); const id=Number(data.id);if(Number.isInteger(id))db.prepare("UPDATE employees SET active=0 WHERE id=?").run(id);else db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
     if (data.action === "pointage") {
-      requirePointageAdmin(req);
+      requireManualPointageAccess(req,data);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
       const lastEvent=db.prepare("SELECT type,service,work_date AS workDate FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
@@ -266,7 +289,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,shift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes});
     }
     if (data.action === "attendanceStatus") {
-      requirePointageAdmin(req);
+      requireManualPointageAccess(req,data);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
       const lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null,workDate=String(data.workDate||new Date().toISOString().slice(0,10)),planned=lastEvent?.type==="Arrivée"?{service:lastEvent.service,scheduledStartMinutes:db.prepare("SELECT MIN(start_minutes) AS value FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,lastEvent.workDate,lastEvent.service).value}:nextPointageService(employee.id,workDate,new Date().toISOString());
