@@ -216,7 +216,28 @@ const server = createServer(async (req, res) => {
       const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);
       const endDate=new Date(`${today}T12:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+7);const schedule=db.prepare("SELECT work_date AS workDate,service,MIN(start_minutes) AS startMinutes,MAX(start_minutes)+30 AS endMinutes FROM schedule_blocks WHERE employee_id=? AND work_date BETWEEN ? AND ? GROUP BY work_date,service ORDER BY work_date,startMinutes").all(employee.id,today,endDate.toISOString().slice(0,10)).map(row=>({...row,closing:Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,row.workDate,row.service))}));
       const accumulatedMinutes=employeeMonthlyMinutes(employee.id,selectedMonth);
-      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedMonth:selectedMonth});
+      const leaveRequests=db.prepare("SELECT id,start_date AS startDate,end_date AS endDate,reason,status,reviewed_at AS reviewedAt,created_at AS createdAt FROM leave_requests WHERE employee_id=? ORDER BY created_at DESC,id DESC LIMIT 20").all(employee.id);
+      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedMonth:selectedMonth,leaveRequests});
+    }
+    if(data.action==="employeeRequestLeave"){
+      const employee=requireEmployee(req),startDate=String(data.startDate||""),endDate=String(data.endDate||""),reason=String(data.reason||"").trim(),today=parisDate(new Date());
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(startDate)||!/^\d{4}-\d{2}-\d{2}$/.test(endDate))throw new Error("Dates de congé invalides");
+      if(startDate<today)throw new Error("La date de début ne peut pas être passée");
+      if(endDate<startDate)throw new Error("La date de fin doit être postérieure au début");
+      if(reason.length>500)throw new Error("Le motif ne peut pas dépasser 500 caractères");
+      const start=new Date(`${startDate}T12:00:00Z`),end=new Date(`${endDate}T12:00:00Z`),duration=Math.round((end.getTime()-start.getTime())/86400000)+1;
+      if(!Number.isFinite(duration)||duration<1||duration>365)throw new Error("Une demande ne peut pas dépasser 365 jours");
+      const overlap=db.prepare("SELECT id FROM leave_requests WHERE employee_id=? AND status IN ('pending','approved') AND NOT(end_date<? OR start_date>?) LIMIT 1").get(employee.id,startDate,endDate);
+      if(overlap)throw Object.assign(new Error("Une demande en attente ou validée existe déjà sur ces dates"),{status:409});
+      const result=db.prepare("INSERT INTO leave_requests(employee_id,start_date,end_date,reason) VALUES(?,?,?,?)").run(employee.id,startDate,endDate,reason);
+      return json(res,200,{success:true,id:Number(result.lastInsertRowid)});
+    }
+    if(data.action==="employeeCancelLeave"){
+      const employee=requireEmployee(req),id=Number(data.id);
+      if(!Number.isInteger(id))throw new Error("Demande de congé invalide");
+      const result=db.prepare("UPDATE leave_requests SET status='cancelled' WHERE id=? AND employee_id=? AND status='pending'").run(id,employee.id);
+      if(!result.changes)throw Object.assign(new Error("Seule une demande en attente peut être annulée"),{status:409});
+      return json(res,200,{success:true});
     }
     if(data.action==="employeePointage"){
       const employee=requireEmployee(req),signature=String(data.signature||""),scanHash=hashToken(data.scanToken),now=new Date().toISOString();
@@ -433,13 +454,21 @@ const server = createServer(async (req, res) => {
       const recent=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate FROM attendance a JOIN employees e ON e.id=a.employee_id ORDER BY a.timestamp DESC LIMIT 12").all();
       const admins=db.prepare("SELECT id,username,role,created_at AS createdAt FROM admins ORDER BY role DESC,username").all();
       const allEmployees=db.prepare("SELECT e.id,e.first_name AS first,e.last_name AS last,e.role,e.color,e.active,e.created_at AS createdAt,a.username AS employeeUsername FROM employees e LEFT JOIN employee_accounts a ON a.employee_id=e.id ORDER BY e.active DESC,e.first_name,e.last_name").all();
+      const leaveRequests=db.prepare("SELECT l.id,l.start_date AS startDate,l.end_date AS endDate,l.reason,l.status,l.reviewed_at AS reviewedAt,l.created_at AS createdAt,e.id AS employeeId,e.first_name AS first,e.last_name AS last,e.role,a.username AS reviewedBy FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN admins a ON a.id=l.reviewed_by ORDER BY CASE l.status WHEN 'pending' THEN 0 ELSE 1 END,l.start_date,l.created_at DESC LIMIT 100").all();
       const month=today.slice(0,7);
       const financialTotals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE substr(entry_date,1,7)=? GROUP BY kind").all(month);
       const expenseCents=financialTotals.find(row=>row.kind==="depense")?.cents||0,offeredCents=financialTotals.find(row=>row.kind==="offert")?.cents||0;
       const financialDays=[];
       for(let offset=6;offset>=0;offset--){const date=new Date(`${today}T12:00:00`);date.setDate(date.getDate()-offset);const key=date.toISOString().slice(0,10);const totals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE entry_date=? GROUP BY kind").all(key);financialDays.push({date:key,depense:(totals.find(row=>row.kind==="depense")?.cents||0)/100,offert:(totals.find(row=>row.kind==="offert")?.cents||0)/100});}
       const financialRecent=db.prepare("SELECT f.id,f.entry_date AS date,f.kind,f.label,f.amount_cents/100.0 AS amount,f.note,a.username AS createdBy FROM financial_entries f LEFT JOIN admins a ON a.id=f.created_by ORDER BY f.entry_date DESC,f.id DESC LIMIT 10").all();
-      return json(res,200,{success:true,stats,recent,admins,employees:allEmployees,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,days:financialDays,recent:financialRecent}});
+      return json(res,200,{success:true,stats,recent,admins,employees:allEmployees,leaveRequests,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,days:financialDays,recent:financialRecent}});
+    }
+    if(data.action==="reviewLeaveRequest"){
+      const current=requireSuperAdmin(req),id=Number(data.id),status=String(data.status||"");
+      if(!Number.isInteger(id)||!["approved","rejected"].includes(status))throw new Error("Décision de congé invalide");
+      const reviewedBy=current.role==="hyperadmin"?null:current.id,result=db.prepare("UPDATE leave_requests SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'").run(status,reviewedBy,new Date().toISOString(),id);
+      if(!result.changes)throw Object.assign(new Error("Cette demande a déjà été traitée ou n’existe plus"),{status:409});
+      return json(res,200,{success:true});
     }
     if (data.action === "createAdmin") {
       requireSuperAdmin(req);

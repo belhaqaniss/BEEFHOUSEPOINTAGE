@@ -11,6 +11,7 @@ type Dashboard = {
   schedule: { workDate: string; service: string; startMinutes: number; endMinutes: number; closing: boolean }[];
   accumulatedMinutes: number;
   accumulatedMonth: string;
+  leaveRequests: { id:number; startDate:string; endDate:string; reason:string; status:"pending"|"approved"|"rejected"|"cancelled"; reviewedAt?:string|null; createdAt:string }[];
 };
 
 const request = async (data: object, token = "") => {
@@ -72,6 +73,8 @@ export default function EmployeePortal() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
   const [hoursMonth, setHoursMonth] = useState(currentParisMonth);
+  const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "" });
+  const [leaveBusy, setLeaveBusy] = useState(false);
   const qrToken = useMemo(() => new URLSearchParams(window.location.search).get("scan") || "", []);
 
   const load = async (token = employeeToken, month = hoursMonth) => {
@@ -116,6 +119,12 @@ export default function EmployeePortal() {
 
   useEffect(() => {
     if (employeeToken) void load(employeeToken, hoursMonth);
+  }, [employeeToken, hoursMonth]);
+
+  useEffect(() => {
+    if (!employeeToken) return;
+    const timer = window.setInterval(() => void load(employeeToken, hoursMonth), 30_000);
+    return () => window.clearInterval(timer);
   }, [employeeToken, hoursMonth]);
 
   useEffect(() => {
@@ -195,6 +204,38 @@ export default function EmployeePortal() {
     }
   };
 
+  const requestLeave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLeaveBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await request({ action: "employeeRequestLeave", ...leaveForm }, employeeToken);
+      setLeaveForm({ startDate: "", endDate: "", reason: "" });
+      setMessage("Votre demande de congé a été envoyée au Super Admin.");
+      await load(employeeToken, hoursMonth);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Envoi de la demande impossible");
+    } finally {
+      setLeaveBusy(false);
+    }
+  };
+
+  const cancelLeave = async (id: number) => {
+    if (!confirm("Annuler cette demande de congé ?")) return;
+    setLeaveBusy(true);
+    setError("");
+    try {
+      await request({ action: "employeeCancelLeave", id }, employeeToken);
+      setMessage("La demande de congé a été annulée.");
+      await load(employeeToken, hoursMonth);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Annulation impossible");
+    } finally {
+      setLeaveBusy(false);
+    }
+  };
+
   const scanValid = Boolean(scanToken && scanExpires && new Date(scanExpires) > new Date());
   const camera = cameraOpen ? <CameraQrScanner onDetected={handleDetected} onClose={() => setCameraOpen(false)}/> : null;
 
@@ -250,6 +291,11 @@ export default function EmployeePortal() {
         <section className="employee-dashboard-grid">
           <article><h2>Mon prochain planning</h2>{dashboard?.schedule.length ? dashboard.schedule.map((item, index) => <div className="employee-schedule" key={`${item.workDate}-${item.service}-${index}`}><span>{new Date(`${item.workDate}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit" })}</span><b>{item.service}</b><strong>{time(item.startMinutes)} – {item.closing ? "FERMETURE" : time(item.endMinutes)}</strong></div>) : <p>Aucun horaire programmé.</p>}</article>
           <article><h2>Mes derniers pointages</h2>{dashboard?.history.length ? dashboard.history.slice(0, 8).map((item, index) => <div className="employee-history" key={`${item.timestamp}-${index}`}><span className={item.type === "Arrivée" ? "in" : "out"}>{item.type === "Arrivée" ? "↘" : "↗"}</span><div><b>{item.type} · {item.service}</b><small>{new Date(item.timestamp).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small></div></div>) : <p>Aucun pointage enregistré.</p>}</article>
+        </section>
+        <section className="employee-leave-card">
+          <div className="employee-leave-heading"><div><small>CONGÉS &amp; ABSENCES</small><h2>Déposer une demande</h2><p>Votre demande restera en attente jusqu’à la décision du Super Admin.</p></div></div>
+          <form onSubmit={requestLeave}><label>Du<input required type="date" min={new Date().toLocaleDateString("en-CA")} value={leaveForm.startDate} onChange={event=>setLeaveForm(current=>({...current,startDate:event.target.value,endDate:current.endDate&&current.endDate<event.target.value?event.target.value:current.endDate}))}/></label><label>Au<input required type="date" min={leaveForm.startDate||new Date().toLocaleDateString("en-CA")} value={leaveForm.endDate} onChange={event=>setLeaveForm({...leaveForm,endDate:event.target.value})}/></label><label className="employee-leave-reason">Motif (facultatif)<textarea maxLength={500} value={leaveForm.reason} onChange={event=>setLeaveForm({...leaveForm,reason:event.target.value})} placeholder="Ex. congés annuels, événement familial…"/></label><button className="employee-primary" disabled={leaveBusy||!leaveForm.startDate||!leaveForm.endDate}>{leaveBusy?"Envoi…":"Envoyer la demande"}</button></form>
+          <div className="employee-leave-list"><h3>Mes demandes</h3>{dashboard?.leaveRequests?.length?dashboard.leaveRequests.map(item=><div className="employee-leave-row" key={item.id}><div><strong>{new Date(`${item.startDate}T12:00:00`).toLocaleDateString("fr-FR")} → {new Date(`${item.endDate}T12:00:00`).toLocaleDateString("fr-FR")}</strong><small>{item.reason||"Aucun motif indiqué"}</small></div><span className={`leave-status ${item.status}`}>{item.status==="pending"?"En attente":item.status==="approved"?"Validé":item.status==="rejected"?"Refusé":"Annulé"}</span>{item.status==="pending"&&<button type="button" disabled={leaveBusy} onClick={()=>cancelLeave(item.id)}>Annuler</button>}</div>):<p className="employee-leave-empty">Aucune demande de congé.</p>}</div>
         </section>
         <section className="employee-security-card">
           <div className="employee-security-heading"><div><small>SÉCURITÉ DU COMPTE</small><h2>Mot de passe</h2><p>Modifiez votre mot de passe personnel depuis cet appareil.</p></div>{!passwordOpen&&<button type="button" onClick={()=>setPasswordOpen(true)}>Modifier mon mot de passe</button>}</div>

@@ -14,6 +14,7 @@ import "./planning-week-banner.css";
 import "./employee-portal.css";
 import "./employee-hours.css";
 import "./employee-security.css";
+import "./leave-requests.css";
 import "./qr-camera.css";
 import "./mobile.css";
 
