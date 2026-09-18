@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON leave_requests(employee_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status, start_date);
 
+CREATE TABLE IF NOT EXISTS customer_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feedback_date TEXT NOT NULL,
+  feedback_time TEXT NOT NULL,
+  table_number TEXT NOT NULL,
+  feedback TEXT NOT NULL,
+  created_by INTEGER REFERENCES admins(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_feedback_date
+ON customer_feedback(feedback_date, feedback_time, id);
+
 CREATE TABLE IF NOT EXISTS attendance_qr_challenges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash TEXT NOT NULL UNIQUE,

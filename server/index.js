@@ -239,6 +239,22 @@ const server = createServer(async (req, res) => {
       if(!result.changes)throw Object.assign(new Error("Seule une demande en attente peut être annulée"),{status:409});
       return json(res,200,{success:true});
     }
+    if(data.action==="customerFeedback"){
+      requireNonResponsableAdmin(req);
+      const feedbackDate=String(data.feedbackDate||parisDate(new Date()));
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(feedbackDate)||Number.isNaN(new Date(`${feedbackDate}T12:00:00Z`).getTime()))throw new Error("Date de retour client invalide");
+      const items=db.prepare("SELECT f.id,f.feedback_date AS feedbackDate,f.feedback_time AS feedbackTime,f.table_number AS tableNumber,f.feedback,f.created_at AS createdAt,COALESCE(a.username,'Compte supprimé') AS createdBy FROM customer_feedback f LEFT JOIN admins a ON a.id=f.created_by WHERE f.feedback_date=? ORDER BY f.feedback_time DESC,f.id DESC").all(feedbackDate);
+      return json(res,200,{success:true,feedbackDate,items});
+    }
+    if(data.action==="createCustomerFeedback"){
+      const current=requireOperationalAdmin(req),feedbackDate=String(data.feedbackDate||""),feedbackTime=String(data.feedbackTime||""),tableNumber=String(data.tableNumber||"").trim(),feedback=String(data.feedback||"").trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(feedbackDate)||Number.isNaN(new Date(`${feedbackDate}T12:00:00Z`).getTime()))throw new Error("Date invalide");
+      if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(feedbackTime))throw new Error("Heure invalide");
+      if(!tableNumber||tableNumber.length>30)throw new Error("Le numéro de table est obligatoire et limité à 30 caractères");
+      if(!feedback||feedback.length>1500)throw new Error("Le retour client est obligatoire et limité à 1 500 caractères");
+      const result=db.prepare("INSERT INTO customer_feedback(feedback_date,feedback_time,table_number,feedback,created_by) VALUES(?,?,?,?,?)").run(feedbackDate,feedbackTime,tableNumber,feedback,current.id);
+      return json(res,200,{success:true,id:Number(result.lastInsertRowid)});
+    }
     if(data.action==="employeePointage"){
       const employee=requireEmployee(req),signature=String(data.signature||""),scanHash=hashToken(data.scanToken),now=new Date().toISOString();
       if(!signature.startsWith("data:image/")||signature.length<200||signature.length>1_000_000)throw new Error("Signature invalide");
@@ -443,13 +459,14 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "superDashboard") {
       requireSuperAdmin(req);
-      const today=String(data.workDate||new Date().toISOString().slice(0,10));
+      const today=String(data.workDate||parisDate(new Date()));
       const stats={
         activeEmployees:db.prepare("SELECT COUNT(*) AS value FROM employees WHERE active=1").get().value,
         inactiveEmployees:db.prepare("SELECT COUNT(*) AS value FROM employees WHERE active=0").get().value,
         todayEvents:db.prepare("SELECT COUNT(*) AS value FROM attendance WHERE work_date=?").get(today).value,
         activeSessions:db.prepare("SELECT COUNT(*) AS value FROM sessions WHERE expires_at>?").get(new Date().toISOString()).value,
-        administrators:db.prepare("SELECT COUNT(*) AS value FROM admins").get().value
+        administrators:db.prepare("SELECT COUNT(*) AS value FROM admins").get().value,
+        customerFeedbackToday:db.prepare("SELECT COUNT(*) AS value FROM customer_feedback WHERE feedback_date=?").get(today).value
       };
       const recent=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate FROM attendance a JOIN employees e ON e.id=a.employee_id ORDER BY a.timestamp DESC LIMIT 12").all();
       const admins=db.prepare("SELECT id,username,role,created_at AS createdAt FROM admins ORDER BY role DESC,username").all();
