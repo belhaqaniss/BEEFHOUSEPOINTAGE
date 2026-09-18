@@ -57,15 +57,13 @@ export default function SuperAdminDashboard(){
     ["Équipe active",data.stats.activeEmployees,"●","red"],
     ["Pointages aujourd’hui",data.stats.todayEvents,"↗","gold"],
     ["Administrateurs",data.stats.administrators,"◆","dark"],
-    ["Sessions actives",data.stats.activeSessions,"◉","green"],
+    ["Retours clients",0,"★","green"],
   ];
   const chartMax=Math.max(1,...data.financial.days.flatMap(day=>[day.depense,day.offert]));
   const money=(value:number)=>new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR"}).format(value);
   const duration=(minutes:number)=>`${Math.floor(minutes/60)} h ${String(minutes%60).padStart(2,"0")}`;
-  const sectionDescription={overview:"Indicateurs, heures et activité récente.",planning:"Préparez les horaires des prochaines semaines.",leave:"Validez ou refusez les demandes de congés.",finance:"Suivez les dépenses et les offerts.",team:"Gérez les employés et les comptes administrateurs."}[view];
   const pendingLeaves=data.leaveRequests.filter(item=>item.status==="pending").length;
   return <section className={`super-dashboard view-${view}`}>
-    <div className="super-hero"><div><span className="super-kicker">CENTRE DE CONTRÔLE</span><p>{sectionDescription}</p></div><button onClick={refresh}>↻ Actualiser</button></div>
     <nav className="super-section-nav" aria-label="Sections du super administrateur"><button className={view==="overview"?"active":""} onClick={()=>setView("overview")}>⌂ Vue d’ensemble</button><button className={view==="planning"?"active":""} onClick={()=>setView("planning")}>▦ Planning</button><button className={view==="leave"?"active":""} onClick={()=>setView("leave")}>☀ Congés{pendingLeaves?` (${pendingLeaves})`:""}</button><button className={view==="finance"?"active":""} onClick={()=>setView("finance")}>€ Finances</button><button className={view==="team"?"active":""} onClick={()=>setView("team")}>● Équipe &amp; accès</button></nav>
     {error&&<div className="super-alert">{error}<button onClick={()=>setError("")}>×</button></div>}
     <div hidden={view!=="overview"} className="super-stats">{cards.map(([label,value,icon,tone])=><article className={`stat-card ${tone}`} key={String(label)}><div><span>{label}</span><strong>{value}</strong></div><b>{icon}</b></article>)}</div>
