@@ -75,6 +75,74 @@
   background: #fff1ef;
 }
 
+.employee-hours-pdf {
+  margin-left: auto;
+  padding: 12px 15px;
+  border: 0;
+  border-radius: 11px;
+  background: #b51f2a;
+  color: #fff;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.employee-hours-pdf:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.employee-hours-detail {
+  margin: -4px 0 20px;
+  border: 1px solid #e2e0dc;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 12px 35px #35312b0c;
+}
+
+.employee-hours-detail summary {
+  padding: 15px 20px;
+  color: #a52630;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.employee-hours-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 20px 13px;
+}
+
+.employee-hours-detail-summary span {
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: #f7f5f3;
+  color: #666d76;
+  font-size: 10px;
+}
+
+.employee-hours-detail-summary b { color: #202532; }
+.employee-hours-days { padding: 0 20px; }
+
+.employee-hours-day {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr) 80px;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #eee;
+  font-size: 10px;
+}
+
+.employee-hours-day > div { display: grid; gap: 5px; }
+.employee-hours-day > strong:last-child { text-align: right; }
+.employee-hours-day span b { color: #a52630; text-transform: capitalize; }
+.employee-hours-day em { color: #8b9099; font-style: normal; }
+.employee-hours-note { margin: 0; padding: 13px 20px 17px; color: #818791; font-size: 9px; }
+
 @media (max-width: 700px) {
   .employee-hours-total {
     align-items: flex-start;
@@ -97,4 +165,13 @@
     width: 34px;
     height: 42px;
   }
+
+  .employee-hours-pdf {
+    order: 1;
+    flex: 1 0 100%;
+    margin: 0;
+  }
+
+  .employee-hours-day { grid-template-columns: 75px minmax(0, 1fr) 56px; gap: 6px; font-size: 9px; }
+  .employee-hours-days { padding: 0 12px; }
 }

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl } from "./apiUrl";
 import CameraQrScanner from "./CameraQrScanner";
+import { downloadEmployeeHoursPdf, type EmployeeMonthReport } from "./employeeHoursPdf";
 import SignaturePad from "./SignaturePad";
 
 type Dashboard = {
@@ -11,6 +12,7 @@ type Dashboard = {
   schedule: { workDate: string; service: string; startMinutes: number; endMinutes: number; closing: boolean }[];
   accumulatedMinutes: number;
   accumulatedMonth: string;
+  monthlyHours?: EmployeeMonthReport;
   leaveRequests: { id:number; startDate:string; endDate:string; reason:string; status:"pending"|"approved"|"rejected"|"cancelled"; reviewedAt?:string|null; createdAt:string }[];
 };
 
@@ -40,6 +42,11 @@ const currentParisMonth = () => {
 };
 
 const monthLabel = (month: string) => new Date(`${month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+const duration = (minutes: number) => `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+const shiftTime = (timestamp: string) => new Intl.DateTimeFormat("fr-FR", {
+  timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+}).format(new Date(timestamp));
+const currentParisDate = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 const moveMonth = (month: string, offset: number) => {
   const date = new Date(`${month}-01T12:00:00`);
@@ -75,14 +82,19 @@ export default function EmployeePortal() {
   const [hoursMonth, setHoursMonth] = useState(currentParisMonth);
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "" });
   const [leaveBusy, setLeaveBusy] = useState(false);
+  const latestLoad = useRef(0);
   const qrToken = useMemo(() => new URLSearchParams(window.location.search).get("scan") || "", []);
 
   const load = async (token = employeeToken, month = hoursMonth) => {
     if (!token) return;
+    const loadId = ++latestLoad.current;
     try {
-      setDashboard(await request({ action: "employeeDashboard", month }, token));
+      const result = await request({ action: "employeeDashboard", month }, token);
+      if (loadId !== latestLoad.current) return;
+      setDashboard(result);
       setError("");
     } catch (reason) {
+      if (loadId !== latestLoad.current) return;
       localStorage.removeItem("employee-token");
       setEmployeeToken("");
       setDashboard(null);
@@ -238,6 +250,7 @@ export default function EmployeePortal() {
 
   const scanValid = Boolean(scanToken && scanExpires && new Date(scanExpires) > new Date());
   const camera = cameraOpen ? <CameraQrScanner onDetected={handleDetected} onClose={() => setCameraOpen(false)}/> : null;
+  const activeReport = dashboard?.monthlyHours?.month === hoursMonth ? dashboard.monthlyHours : null;
 
   if (!employeeToken) {
     return (
@@ -268,7 +281,8 @@ export default function EmployeePortal() {
       <header className="employee-header"><div><b>BEEF HOUSE</b><span>Espace Employé</span></div><button onClick={logout}>Déconnexion</button></header>
       <section className="employee-shell">
         <div className="employee-welcome"><div><small>COMPTE PERSONNEL</small><h1>{dashboard?.employee.first} {dashboard?.employee.last}</h1><p>{dashboard?.employee.role} · @{dashboard?.employee.username}</p></div><span className={dashboard?.hasOpenArrival ? "working" : "away"}>{dashboard?.hasOpenArrival ? "● Au travail" : "○ Non pointé"}</span></div>
-        <section className="employee-hours-total"><button className="employee-month-arrow" type="button" aria-label="Mois précédent" onClick={() => setHoursMonth((month) => moveMonth(month, -1))}>‹</button><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{Math.floor((dashboard?.accumulatedMinutes || 0) / 60)} h {String((dashboard?.accumulatedMinutes || 0) % 60).padStart(2, "0")}</strong><p>{monthLabel(dashboard?.accumulatedMonth || hoursMonth)} · services terminés uniquement</p></div><button className="employee-month-arrow" type="button" aria-label="Mois suivant" disabled={hoursMonth >= currentParisMonth()} onClick={() => setHoursMonth((month) => moveMonth(month, 1))}>›</button></section>
+        <section className="employee-hours-total"><button className="employee-month-arrow" type="button" aria-label="Mois précédent" onClick={() => setHoursMonth((month) => moveMonth(month, -1))}>‹</button><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{activeReport ? duration(activeReport.totalMinutes) : "Chargement…"}</strong><p>{monthLabel(hoursMonth)} · services terminés uniquement</p></div><button className="employee-hours-pdf" type="button" disabled={!activeReport || !dashboard?.employee} onClick={() => activeReport && dashboard?.employee && downloadEmployeeHoursPdf(dashboard.employee, activeReport)}>↓ Télécharger le PDF</button><button className="employee-month-arrow" type="button" aria-label="Mois suivant" disabled={hoursMonth >= currentParisMonth()} onClick={() => setHoursMonth((month) => moveMonth(month, 1))}>›</button></section>
+        <details className="employee-hours-detail" key={hoursMonth}><summary>Voir les heures jour par jour · {monthLabel(hoursMonth)}</summary>{activeReport ? <><div className="employee-hours-detail-summary"><span>Matin <b>{duration(activeReport.morningMinutes)}</b></span><span>Soir <b>{duration(activeReport.eveningMinutes)}</b></span><span>Total <b>{duration(activeReport.totalMinutes)}</b></span></div><div className="employee-hours-days">{activeReport.days.map(day => <div className="employee-hours-day" key={day.date}><strong>{new Date(`${day.date}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" })}</strong><div>{day.shifts.length ? day.shifts.map((shift, index) => <span key={`${shift.start}-${index}`}><b>{shift.service}</b> {shiftTime(shift.start)} - {shift.end ? shiftTime(shift.end) : day.date === currentParisDate() && dashboard?.lastEvent?.timestamp === shift.start ? "en cours" : "départ manquant"}</span>) : <em>Aucun pointage</em>}</div><strong>{day.minutes ? duration(day.minutes) : day.shifts.some(shift => !shift.end) ? day.date === currentParisDate() ? "En cours" : "À vérifier" : "--"}</strong></div>)}</div><p className="employee-hours-note">Seuls les services avec une arrivée et un départ sont comptés. Le planning ne remplace pas les pointages.</p></> : <p className="employee-hours-note">Chargement du relevé…</p>}</details>
         {message && <div className="employee-success">{message}</div>}
         {error && <div className="employee-error">{error}</div>}
         {scanValid ? (

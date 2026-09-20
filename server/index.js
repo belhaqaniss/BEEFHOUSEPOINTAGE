@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "node:process";
 import { createWhatsAppHandler } from "./whatsapp.js";
 import { createTelegramHandler } from "./telegram.js";
+import { buildEmployeeMonthReport } from "./employee-hours.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const envFile = join(root, "..", ".env");
@@ -142,21 +143,6 @@ const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZon
 const parisHour=timestamp=>Number(new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)).find(part=>part.type==="hour")?.value||0);
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
 const pointageService=timestamp=>parisHour(timestamp)>=13?"soir":"matin";
-const employeeMonthlyMinutes=(employeeId,month)=>{
-  const events=db.prepare("SELECT a.type,a.timestamp,a.work_date AS workDate FROM attendance a WHERE a.employee_id=? AND substr(a.work_date,1,7)=? ORDER BY a.work_date,a.timestamp,a.id").all(employeeId,month),open=new Map();
-  let totalMs=0;
-  for(const event of events){
-    const key=event.workDate;
-    if(event.type==="Arrivée"){
-      open.set(key,new Date(event.timestamp));
-      continue;
-    }
-    const start=open.get(key),end=new Date(event.timestamp),difference=end.getTime()-(start?.getTime()||NaN);
-    if(start&&Number.isFinite(difference)&&difference>0&&difference<24*60*60*1000)totalMs+=difference;
-    open.delete(key);
-  }
-  return Math.round(totalMs/60_000);
-};
 const nextPointageService=(employeeId,workDate,timestamp)=>{const service=pointageService(timestamp),scheduled=db.prepare("SELECT MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employeeId,workDate,service);return {service,scheduledStartMinutes:scheduled?.startMinutes??null};};
 const normalizeAttendanceServices=()=>{const rows=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type,timestamp,service FROM attendance ORDER BY employee_id,work_date,timestamp,id").all(),open=new Map(),update=db.prepare("UPDATE attendance SET service=? WHERE id=?");db.exec("BEGIN");try{for(const row of rows){const key=`${row.employeeId}:${row.workDate}`,stack=open.get(key)||[];if(row.type==="Arrivée"){const service=pointageService(row.timestamp);stack.push(service);open.set(key,stack);if(row.service!==service)update.run(service,row.id)}else{const service=stack.pop()||row.service||"matin";if(stack.length)open.set(key,stack);else open.delete(key);if(row.service!==service)update.run(service,row.id)}}db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}};
 normalizeAttendanceServices();
@@ -215,9 +201,11 @@ const server = createServer(async (req, res) => {
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth))throw new Error("Mois invalide");
       const history=db.prepare("SELECT type,timestamp,work_date AS workDate,service FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 20").all(employee.id);
       const endDate=new Date(`${today}T12:00:00Z`);endDate.setUTCDate(endDate.getUTCDate()+7);const schedule=db.prepare("SELECT work_date AS workDate,service,MIN(start_minutes) AS startMinutes,MAX(start_minutes)+30 AS endMinutes FROM schedule_blocks WHERE employee_id=? AND work_date BETWEEN ? AND ? GROUP BY work_date,service ORDER BY work_date,startMinutes").all(employee.id,today,endDate.toISOString().slice(0,10)).map(row=>({...row,closing:Boolean(db.prepare("SELECT id FROM schedule_closings WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,row.workDate,row.service))}));
-      const accumulatedMinutes=employeeMonthlyMinutes(employee.id,selectedMonth);
+      const monthEvents=db.prepare("SELECT id,type,timestamp,work_date AS workDate FROM attendance WHERE employee_id=? AND substr(work_date,1,7)=? ORDER BY work_date,timestamp,id").all(employee.id,selectedMonth);
+      const monthlyHours=buildEmployeeMonthReport(monthEvents,selectedMonth,today);
+      const accumulatedMinutes=monthlyHours.totalMinutes;
       const leaveRequests=db.prepare("SELECT id,start_date AS startDate,end_date AS endDate,reason,status,reviewed_at AS reviewedAt,created_at AS createdAt FROM leave_requests WHERE employee_id=? ORDER BY created_at DESC,id DESC LIMIT 20").all(employee.id);
-      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedMonth:selectedMonth,leaveRequests});
+      return json(res,200,{success:true,employee,hasOpenArrival:lastEvent?.type==="Arrivée",lastEvent,history,schedule,accumulatedMinutes,accumulatedMonth:selectedMonth,monthlyHours,leaveRequests});
     }
     if(data.action==="employeeRequestLeave"){
       const employee=requireEmployee(req),startDate=String(data.startDate||""),endDate=String(data.endDate||""),reason=String(data.reason||"").trim(),today=parisDate(new Date());
