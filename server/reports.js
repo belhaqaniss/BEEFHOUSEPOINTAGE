@@ -30,8 +30,9 @@ const parisClock=value=>new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris"
 const parisMinutes=value=>{const [hour,minute]=parisClock(value).split(":").map(Number);return hour*60+minute};
 const summary=(person,records,date)=>{
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts=[];
-  for(const event of events)if(event.type==="Arrivée"){const start=new Date(event.timestamp),minutes=parisMinutes(event.timestamp),period=minutes>=780?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>!shift.end);if(open)open.end=new Date(event.timestamp)}
-  const ordered=[shifts.find(shift=>shift.period==="matin"),shifts.find(shift=>shift.period==="soir")],duration=shift=>{if(!shift?.start||!shift.end)return 0;const day=86400000,diff=shift.end-shift.start;return ((diff%day)+day)%day/3600000},clock=value=>value?parisClock(value):"";return {name:`${person.first} ${person.last}`,start1:clock(ordered[0]?.start),end1:clock(ordered[0]?.end),hours1:duration(ordered[0]),start2:clock(ordered[1]?.start),end2:clock(ordered[1]?.end),hours2:duration(ordered[1])};
+  for(const event of events)if(event.type==="Arrivée"){const start=new Date(event.timestamp),minutes=parisMinutes(event.timestamp),period=minutes<420||minutes>=780?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>!shift.end);if(open)open.end=new Date(event.timestamp)}
+  const clock=value=>value?parisClock(value):"",total=period=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.end&&shift.end-shift.start>0&&shift.end-shift.start<86400000);return{start:clock(own[0]?.start),end:clock(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+(shift.end-shift.start)/3600000,0)}},morning=total("matin"),evening=total("soir");
+  return {name:`${person.first} ${person.last}`,start1:morning.start,end1:morning.end,hours1:morning.hours,start2:evening.start,end2:evening.end,hours2:evening.hours};
 };
 
 export const buildDailyHoursPdf=(date,people,records)=>{

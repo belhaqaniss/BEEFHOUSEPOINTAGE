@@ -5,9 +5,11 @@ const xml=(value:string)=>value.replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 const parisTime=(value:Date)=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(value),part=(type:string)=>Number(parts.find(item=>item.type===type)?.value||0);return {hour:part("hour"),minutes:part("hour")*60+part("minute")}};
 export const employeeSummary=(person:ExcelPerson,records:ExcelAttendance[],date:string)=>{
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts:{start?:Date;end?:Date;period:"matin"|"soir"}[]=[];
-  for(const event of events){if(event.type==="Arrivée"){const start=new Date(event.timestamp),arrivalTime=parisTime(start),period=arrivalTime.hour>=13?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>shift.start&&!shift.end);if(open)open.end=new Date(event.timestamp)}}
-  const ordered=[shifts.find(shift=>shift.period==="matin"),shifts.find(shift=>shift.period==="soir")],duration=(shift?:{start?:Date;end?:Date})=>{if(!shift?.start||!shift.end)return 0;const day=24*60*60*1000,difference=shift.end.getTime()-shift.start.getTime();return ((difference%day)+day)%day/3600000},time=(value?:Date)=>value?value.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"",hours1=duration(ordered[0]),hours2=duration(ordered[1]);
-  return{name:`${person.first} ${person.last}`,start1:time(ordered[0]?.start),end1:time(ordered[0]?.end),hours1,start2:time(ordered[1]?.start),end2:time(ordered[1]?.end),hours2,total:hours1+hours2};
+  for(const event of events){if(event.type==="Arrivée"){const start=new Date(event.timestamp),arrivalTime=parisTime(start),period=arrivalTime.hour<7||arrivalTime.hour>=13?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>shift.start&&!shift.end);if(open)open.end=new Date(event.timestamp)}}
+  const time=(value?:Date)=>value?new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(value):"";
+  const total=(period:"matin"|"soir")=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.start&&shift.end&&shift.end.getTime()>shift.start.getTime()&&shift.end.getTime()-shift.start.getTime()<86_400_000);return{start:time(own[0]?.start),end:time(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+(shift.end!.getTime()-shift.start!.getTime())/3_600_000,0)}};
+  const morning=total("matin"),evening=total("soir");
+  return{name:`${person.first} ${person.last}`,start1:morning.start,end1:morning.end,hours1:morning.hours,start2:evening.start,end2:evening.end,hours2:evening.hours,total:morning.hours+evening.hours};
 };
 
 export function downloadDailyExcel(date:string,people:ExcelPerson[],records:ExcelAttendance[]){

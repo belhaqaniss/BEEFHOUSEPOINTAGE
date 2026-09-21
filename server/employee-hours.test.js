@@ -56,3 +56,29 @@ test("une arrivée non clôturée ne gonfle pas le cumul", () => {
   assert.equal(report.completedShifts, 1);
   assert.equal(report.days[1].shifts.filter(shift => !shift.end).length, 1);
 });
+
+test("deux services du soir le même jour sont tous deux comptés", () => {
+  const report = buildEmployeeMonthReport([
+    event(1, "2026-09-20", "Arrivée", "2026-09-20T16:00:00Z"),
+    event(2, "2026-09-20", "Départ", "2026-09-20T18:00:00Z"),
+    event(3, "2026-09-20", "Arrivée", "2026-09-20T19:00:00Z"),
+    event(4, "2026-09-20", "Départ", "2026-09-20T23:00:00Z")
+  ], "2026-09", "2026-09-21");
+  assert.equal(report.totalMinutes, 360);
+  assert.equal(report.eveningMinutes, 360);
+  assert.equal(report.completedShifts, 2);
+});
+
+test("la troisième signature ouvre un nouveau service sans mélanger la veille", () => {
+  const report = buildEmployeeMonthReport([
+    event(1, "2026-09-19", "Arrivée", "2026-09-19T18:00:00Z"),
+    event(2, "2026-09-19", "Départ", "2026-09-19T22:00:00Z"),
+    event(3, "2026-09-20", "Arrivée", "2026-09-20T08:00:00Z"),
+    event(4, "2026-09-20", "Départ", "2026-09-20T10:00:00Z"),
+    event(5, "2026-09-20", "Arrivée", "2026-09-20T16:00:00Z")
+  ], "2026-09", "2026-09-20");
+  assert.equal(report.days[18].minutes, 240);
+  assert.equal(report.days[19].minutes, 120);
+  assert.equal(report.days[19].shifts[1].end, null);
+  assert.equal(report.totalMinutes, 360);
+});

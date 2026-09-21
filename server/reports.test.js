@@ -8,3 +8,14 @@ test("génère les deux rapports PDF de la veille",()=>{
   const hours=buildDailyHoursPdf("2026-08-24",[{first:"Ali",last:"Test",role:"Salle"}],[]);
   assert.equal(detail.subarray(0,4).toString(),"%PDF");assert.equal(hours.subarray(0,4).toString(),"%PDF");
 });
+
+test("le PDF additionne plusieurs passages du soir sans compter la pause",()=>{
+  const records=[
+    {name:"Ali Test",workDate:"2026-09-20",type:"Arrivée",timestamp:"2026-09-20T16:00:00Z"},
+    {name:"Ali Test",workDate:"2026-09-20",type:"Départ",timestamp:"2026-09-20T18:00:00Z"},
+    {name:"Ali Test",workDate:"2026-09-20",type:"Arrivée",timestamp:"2026-09-20T19:00:00Z"},
+    {name:"Ali Test",workDate:"2026-09-20",type:"Départ",timestamp:"2026-09-20T23:00:00Z"}
+  ];
+  const pdf=buildDailyHoursPdf("2026-09-20",[{first:"Ali",last:"Test",role:"Salle"}],records).toString();
+  assert.match(pdf,/\(6\.00\)/);
+});

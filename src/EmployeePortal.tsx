@@ -7,6 +7,7 @@ import SignaturePad from "./SignaturePad";
 type Dashboard = {
   employee: { first: string; last: string; role: string; username: string };
   hasOpenArrival: boolean;
+  punchBlockedReason?: string | null;
   lastEvent?: { type: string; timestamp: string; service: string; workDate: string } | null;
   history: { type: string; timestamp: string; service: string; workDate: string }[];
   schedule: { workDate: string; service: string; startMinutes: number; endMinutes: number; closing: boolean }[];
@@ -46,7 +47,6 @@ const duration = (minutes: number) => `${Math.floor(minutes / 60)} h ${String(mi
 const shiftTime = (timestamp: string) => new Intl.DateTimeFormat("fr-FR", {
   timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
 }).format(new Date(timestamp));
-const currentParisDate = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 const moveMonth = (month: string, offset: number) => {
   const date = new Date(`${month}-01T12:00:00`);
@@ -135,9 +135,9 @@ export default function EmployeePortal() {
 
   useEffect(() => {
     if (!employeeToken) return;
-    const timer = window.setInterval(() => void load(employeeToken, hoursMonth), 30_000);
+    const timer = window.setInterval(() => void load(employeeToken, hoursMonth), dashboard?.punchBlockedReason?.startsWith("Attendez") ? 5_000 : 30_000);
     return () => window.clearInterval(timer);
-  }, [employeeToken, hoursMonth]);
+  }, [employeeToken, hoursMonth, dashboard?.punchBlockedReason]);
 
   useEffect(() => {
     if (qrToken) void activateQr(qrToken);
@@ -282,7 +282,7 @@ export default function EmployeePortal() {
       <section className="employee-shell">
         <div className="employee-welcome"><div><small>COMPTE PERSONNEL</small><h1>{dashboard?.employee.first} {dashboard?.employee.last}</h1><p>{dashboard?.employee.role} · @{dashboard?.employee.username}</p></div><span className={dashboard?.hasOpenArrival ? "working" : "away"}>{dashboard?.hasOpenArrival ? "● Au travail" : "○ Non pointé"}</span></div>
         <section className="employee-hours-total"><button className="employee-month-arrow" type="button" aria-label="Mois précédent" onClick={() => setHoursMonth((month) => moveMonth(month, -1))}>‹</button><div className="employee-hours-icon">◷</div><div className="employee-hours-value"><small>HEURES DU MOIS</small><strong>{activeReport ? duration(activeReport.totalMinutes) : "Chargement…"}</strong><p>{monthLabel(hoursMonth)} · services terminés uniquement</p></div><button className="employee-hours-pdf" type="button" disabled={!activeReport || !dashboard?.employee} onClick={() => activeReport && dashboard?.employee && downloadEmployeeHoursPdf(dashboard.employee, activeReport)}>↓ Télécharger le PDF</button><button className="employee-month-arrow" type="button" aria-label="Mois suivant" disabled={hoursMonth >= currentParisMonth()} onClick={() => setHoursMonth((month) => moveMonth(month, 1))}>›</button></section>
-        <details className="employee-hours-detail" key={hoursMonth}><summary>Voir les heures jour par jour · {monthLabel(hoursMonth)}</summary>{activeReport ? <><div className="employee-hours-detail-summary"><span>Matin <b>{duration(activeReport.morningMinutes)}</b></span><span>Soir <b>{duration(activeReport.eveningMinutes)}</b></span><span>Total <b>{duration(activeReport.totalMinutes)}</b></span></div><div className="employee-hours-days">{activeReport.days.map(day => <div className="employee-hours-day" key={day.date}><strong>{new Date(`${day.date}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" })}</strong><div>{day.shifts.length ? day.shifts.map((shift, index) => <span key={`${shift.start}-${index}`}><b>{shift.service}</b> {shiftTime(shift.start)} - {shift.end ? shiftTime(shift.end) : day.date === currentParisDate() && dashboard?.lastEvent?.timestamp === shift.start ? "en cours" : "départ manquant"}</span>) : <em>Aucun pointage</em>}</div><strong>{day.minutes ? duration(day.minutes) : day.shifts.some(shift => !shift.end) ? day.date === currentParisDate() ? "En cours" : "À vérifier" : "--"}</strong></div>)}</div><p className="employee-hours-note">Seuls les services avec une arrivée et un départ sont comptés. Le planning ne remplace pas les pointages.</p></> : <p className="employee-hours-note">Chargement du relevé…</p>}</details>
+        <details className="employee-hours-detail" key={hoursMonth}><summary>Voir les heures jour par jour · {monthLabel(hoursMonth)}</summary>{activeReport ? <><div className="employee-hours-detail-summary"><span>Matin <b>{duration(activeReport.morningMinutes)}</b></span><span>Soir <b>{duration(activeReport.eveningMinutes)}</b></span><span>Total <b>{duration(activeReport.totalMinutes)}</b></span></div><div className="employee-hours-days">{activeReport.days.map(day => <div className="employee-hours-day" key={day.date}><strong>{new Date(`${day.date}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" })}</strong><div>{day.shifts.length ? day.shifts.map((shift, index) => <span key={`${shift.start}-${index}`}><b>{shift.service}</b> {shiftTime(shift.start)} - {shift.end ? shiftTime(shift.end) : dashboard?.lastEvent?.type === "Arrivée" && dashboard.lastEvent.timestamp === shift.start ? "en cours" : "départ manquant"}</span>) : <em>Aucun pointage</em>}</div><strong>{day.minutes ? duration(day.minutes) : day.shifts.some(shift => !shift.end) ? day.shifts.some(shift => dashboard?.lastEvent?.type === "Arrivée" && dashboard.lastEvent.timestamp === shift.start) ? "En cours" : "À vérifier" : "--"}</strong></div>)}</div><p className="employee-hours-note">Seuls les services avec une arrivée et un départ sont comptés. Le planning ne remplace pas les pointages.</p></> : <p className="employee-hours-note">Chargement du relevé…</p>}</details>
         {message && <div className="employee-success">{message}</div>}
         {error && <div className="employee-error">{error}</div>}
         {scanValid ? (
@@ -290,8 +290,9 @@ export default function EmployeePortal() {
             <div className="scan-approved">✓ QR CODE VALIDÉ</div>
             <h2>{dashboard?.hasOpenArrival ? "Signer mon départ" : "Signer mon arrivée"}</h2>
             <p>Votre identité et l’heure seront vérifiées par le serveur au moment de la validation.</p>
+            {dashboard?.punchBlockedReason && <p className="employee-error">{dashboard.punchBlockedReason}</p>}
             <SignaturePad key={scanToken} setValue={setSignature}/>
-            <button className="employee-primary" disabled={!signature || busy} onClick={submit}>{busy ? "Enregistrement…" : `Valider mon ${dashboard?.hasOpenArrival ? "départ" : "arrivée"}`}</button>
+            <button className="employee-primary" disabled={!signature || busy || Boolean(dashboard?.punchBlockedReason)} onClick={submit}>{busy ? "Enregistrement…" : `Valider mon ${dashboard?.hasOpenArrival ? "départ" : "arrivée"}`}</button>
           </section>
         ) : (
           <section className="employee-scan-card empty-scan">

@@ -16,7 +16,8 @@ export function buildEmployeeMonthReport(events, month, throughDate) {
     if (!event.workDate.startsWith(`${month}-`)) continue;
     const day = byDate.get(event.workDate) || { date: event.workDate, shifts: [], milliseconds: 0 };
     if (event.type === "Arrivée") {
-      const shift = { service: parisHour(event.timestamp) >= 13 ? "soir" : "matin", start: event.timestamp, end: null };
+      const hour = parisHour(event.timestamp);
+      const shift = { service: hour < 7 || hour >= 13 ? "soir" : "matin", start: event.timestamp, end: null };
       day.shifts.push(shift);
       openByDate.set(event.workDate, shift);
     } else {
