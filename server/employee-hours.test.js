@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEmployeeMonthReport } from "./employee-hours.js";
+import { buildEmployeeMonthReport, buildEmployeeRangeReport } from "./employee-hours.js";
 
 const event = (id, workDate, type, timestamp) => ({ id, workDate, type, timestamp });
 
@@ -81,4 +81,32 @@ test("la troisième signature ouvre un nouveau service sans mélanger la veille"
   assert.equal(report.days[19].minutes, 120);
   assert.equal(report.days[19].shifts[1].end, null);
   assert.equal(report.totalMinutes, 360);
+});
+
+test("calcule une semaine complète même lorsqu’elle traverse deux mois", () => {
+  const report = buildEmployeeRangeReport([
+    event(1, "2026-08-31", "Arrivée", "2026-08-31T08:00:00Z"),
+    event(2, "2026-08-31", "Départ", "2026-08-31T12:00:00Z"),
+    event(3, "2026-09-01", "Arrivée", "2026-09-01T18:00:00Z"),
+    event(4, "2026-09-01", "Départ", "2026-09-02T01:00:00Z"),
+    event(5, "2026-09-07", "Arrivée", "2026-09-07T08:00:00Z"),
+    event(6, "2026-09-07", "Départ", "2026-09-07T09:00:00Z")
+  ], "2026-08-31", "2026-09-06");
+  assert.equal(report.morningMinutes, 240);
+  assert.equal(report.eveningMinutes, 420);
+  assert.equal(report.totalMinutes, 660);
+  assert.equal(report.completedDays, 2);
+  assert.equal(report.completedShifts, 2);
+});
+
+test("ignore les services incomplets dans le cumul hebdomadaire", () => {
+  const report = buildEmployeeRangeReport([
+    event(1, "2026-09-21", "Arrivée", "2026-09-21T08:00:00Z"),
+    event(2, "2026-09-22", "Arrivée", "2026-09-22T18:00:00Z"),
+    event(3, "2026-09-22", "Départ", "2026-09-23T00:00:00Z")
+  ], "2026-09-21", "2026-09-27");
+  assert.equal(report.morningMinutes, 0);
+  assert.equal(report.eveningMinutes, 360);
+  assert.equal(report.completedDays, 1);
+  assert.equal(report.completedShifts, 1);
 });

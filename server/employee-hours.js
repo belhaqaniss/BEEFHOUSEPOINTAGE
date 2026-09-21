@@ -4,6 +4,40 @@ const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR", {
 
 const roundedMinutes = milliseconds => Math.round(milliseconds / 60_000);
 
+export function buildEmployeeRangeReport(events, startDate, endDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    throw new Error("Période invalide");
+  }
+  const openByDate = new Map();
+  const completedDays = new Set();
+  let totalMilliseconds = 0;
+  let morningMilliseconds = 0;
+  let completedShifts = 0;
+  for (const event of [...events].sort((a, b) => a.workDate.localeCompare(b.workDate) || a.timestamp.localeCompare(b.timestamp) || a.id - b.id)) {
+    if (event.workDate < startDate || event.workDate > endDate) continue;
+    if (event.type === "Arrivée") {
+      const hour = parisHour(event.timestamp);
+      openByDate.set(event.workDate, { service: hour < 7 || hour >= 13 ? "soir" : "matin", start: event.timestamp });
+      continue;
+    }
+    const open = openByDate.get(event.workDate);
+    openByDate.delete(event.workDate);
+    if (!open) continue;
+    const difference = new Date(event.timestamp).getTime() - new Date(open.start).getTime();
+    if (difference <= 0 || difference >= 86_400_000) continue;
+    totalMilliseconds += difference;
+    if (open.service === "matin") morningMilliseconds += difference;
+    completedDays.add(event.workDate);
+    completedShifts++;
+  }
+  const totalMinutes = roundedMinutes(totalMilliseconds);
+  const morningMinutes = roundedMinutes(morningMilliseconds);
+  return {
+    startDate, endDate, morningMinutes, eveningMinutes: totalMinutes - morningMinutes,
+    totalMinutes, completedDays: completedDays.size, completedShifts
+  };
+}
+
 export function buildEmployeeMonthReport(events, month, throughDate) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Mois invalide");
   const [year, monthNumber] = month.split("-").map(Number);

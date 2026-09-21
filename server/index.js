@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "node:process";
 import { createWhatsAppHandler } from "./whatsapp.js";
 import { createTelegramHandler } from "./telegram.js";
-import { buildEmployeeMonthReport } from "./employee-hours.js";
+import { buildEmployeeMonthReport, buildEmployeeRangeReport } from "./employee-hours.js";
 import { assertPunchAllowed, businessWorkDate, punchAvailability, punchService } from "./attendance-rules.js";
 import { adjacentWorkDates, assertManualAttendanceAvailable, buildManualAttendance } from "./manual-attendance.js";
 
@@ -442,6 +442,22 @@ const server = createServer(async (req, res) => {
       });
       const morningMinutes=employees.reduce((sum,employee)=>sum+employee.morningMinutes,0),eveningMinutes=employees.reduce((sum,employee)=>sum+employee.eveningMinutes,0);
       return json(res,200,{success:true,month,employees,morningMinutes,eveningMinutes,totalMinutes:morningMinutes+eveningMinutes});
+    }
+    if (data.action === "weeklyHours") {
+      requireSuperAdmin(req);
+      const weekStart=String(data.weekStart||"");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Semaine invalide");
+      const start=new Date(`${weekStart}T12:00:00Z`);
+      if(Number.isNaN(start.getTime()))throw new Error("Semaine invalide");
+      const end=new Date(start);end.setUTCDate(end.getUTCDate()+6);const weekEnd=end.toISOString().slice(0,10);
+      const staff=db.prepare("SELECT id,first_name AS first,last_name AS last,role,color FROM employees WHERE active=1 ORDER BY first_name,last_name").all();
+      const events=db.prepare("SELECT a.id,a.employee_id AS employeeId,a.type,a.timestamp,a.work_date AS workDate,a.service FROM attendance a WHERE a.work_date BETWEEN ? AND ? ORDER BY a.employee_id,a.work_date,a.timestamp,a.id").all(weekStart,weekEnd);
+      const employees=staff.map(employee=>{
+        const own=events.filter(event=>event.employeeId===employee.id),report=buildEmployeeRangeReport(own,weekStart,weekEnd);
+        return {...employee,morningMinutes:report.morningMinutes,eveningMinutes:report.eveningMinutes,totalMinutes:report.totalMinutes,shifts:report.completedShifts,days:report.completedDays};
+      });
+      const morningMinutes=employees.reduce((sum,employee)=>sum+employee.morningMinutes,0),eveningMinutes=employees.reduce((sum,employee)=>sum+employee.eveningMinutes,0);
+      return json(res,200,{success:true,weekStart,weekEnd,employees,morningMinutes,eveningMinutes,totalMinutes:morningMinutes+eveningMinutes});
     }
     if (data.action === "addManualAttendance") {
       const current=requireOperationalAdmin(req),employeeId=Number(data.employeeId);
