@@ -4,3 +4,4 @@
 .finance-totals>div.error-total strong{color:#6550a8}
 .finance-kind.erreur{background:#eeeafd;color:#6550a8}
 @media(max-width:700px){.finance-totals{grid-template-columns:1fr}}
+.finance-history-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.finance-history-title h4{margin:0}.finance-history-title span{padding:5px 8px;border-radius:20px;background:#f2f0ed;color:#707580;font-size:8px;font-weight:800}
