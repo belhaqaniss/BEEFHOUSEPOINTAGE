@@ -12,13 +12,14 @@ import SignaturePad from "./SignaturePad";
 import "./attendance-editor.css";
 import "./login-password.css";
 import "./attendance-pairs.css";
+import "./manual-attendance.css";
 import "./planned-start.css";
 import { downloadDailyHoursPdf } from "./dailyHoursPdf";
 import { employeeSummary } from "./dailyExcel";
 import { apiUrl } from "./apiUrl";
 import { downloadDailyDetailsPdf, type DailyDetail, type DailyEntry } from "./dailyDetailsPdf";
 
-type Person={first:string;last:string;role:string;color:string};
+type Person={id?:number;first:string;last:string;role:string;color:string};
 type AttendanceRecord={id:number;name:string;type:"Arrivée"|"Départ";timestamp:string;workDate:string;service?:"matin"|"soir";scheduledStartMinutes:number|null;scheduledMorningStartMinutes?:number|null;scheduledEveningStartMinutes?:number|null};
 type AttendancePair={name:string;index:number;arrival?:AttendanceRecord;departure?:AttendanceRecord};
 type AppTab="pointage"|"qr"|"commande"|"feedback"|"details"|"hours"|"pourboire"|"responsable"|"superadmin"|"hyperadmin";
@@ -37,6 +38,7 @@ function AdminApp(){
  const[detailEntries,setDetailEntries]=useState<DailyEntry[]>([]),[entryForm,setEntryForm]=useState<DailyEntry>({kind:"depense",label:"",amount:0,note:""});
  const today=()=>new Date().toLocaleDateString("en-CA");
  const[records,setRecords]=useState<AttendanceRecord[]>([]),[reportDate,setReportDate]=useState(today()),[editingTime,setEditingTime]=useState<Record<number,string>>({});
+ const[manualHours,setManualHours]=useState({employeeId:"",arrival:"",departure:""});
  const[team,setTeam]=useState<Person[]>(defaultPeople),[managing,setManaging]=useState(false),[newPerson,setNewPerson]=useState({first:"",last:"",role:""});
  const[now,setNow]=useState(()=>new Date());
  const[selectedHasOpenArrival,setSelectedHasOpenArrival]=useState(false),[selectedShift,setSelectedShift]=useState<"matin"|"soir">("matin"),[plannedStart,setPlannedStart]=useState<number|null>(null),[statusLoading,setStatusLoading]=useState(false),[punchBlockedReason,setPunchBlockedReason]=useState("");
@@ -60,6 +62,7 @@ function AdminApp(){
  const deleteAttendancePair=async(pair:AttendancePair)=>{if(!confirm(`Supprimer le service ${pair.index} de ${pair.name} ?`))return;const ids=[pair.arrival?.id,pair.departure?.id].filter((id):id is number=>typeof id==="number");setBusy(true);try{await api({action:"deleteAttendancePair",ids});const result=await api({action:"report",workDate:reportDate});setRecords(result.records||[]);setMessage(`Service ${pair.index} de ${pair.name} supprimé.`)}catch(error){setMessage(error instanceof Error?error.message:"Suppression impossible")}finally{setBusy(false)}};
  const summary=(p:Person)=>employeeSummary(p,records,reportDate);
  const downloadReport=async()=>{setBusy(true);try{const[freshTeam,result]=await Promise.all([loadEmployees(),api({action:"report",workDate:reportDate})]),freshRecords=result.records||[];setRecords(freshRecords);downloadDailyHoursPdf(reportDate,freshTeam,freshRecords)}catch(error){setMessage(error instanceof Error?error.message:"Téléchargement impossible")}finally{setBusy(false)}};
+ const addManualHours=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);try{const saved=await api({action:"addManualAttendance",employeeId:Number(manualHours.employeeId),workDate:reportDate,arrival:manualHours.arrival,departure:manualHours.departure});const result=await api({action:"report",workDate:reportDate});setRecords(result.records||[]);setManualHours(current=>({...current,arrival:"",departure:""}));setMessage(`Heures de ${saved.employee.first} ${saved.employee.last} ajoutées pour le ${new Date(`${reportDate}T12:00:00`).toLocaleDateString("fr-FR")}.`)}catch(error){setMessage(error instanceof Error?error.message:"Ajout des heures impossible")}finally{setBusy(false)}};
  const addDetailEntry=()=>{const label=entryForm.label.trim(),amount=Number(entryForm.amount);if(!label||!Number.isFinite(amount)||amount<0)return;setDetailEntries(entries=>[...entries,{...entryForm,label,amount}]);setEntryForm({kind:"depense",label:"",amount:0,note:""})};
  const add=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);try{await api({action:"details",...form,entries:detailEntries,workDate:reportDate,date:new Date().toISOString()});setMessage("Les détails, dépenses et offerts ont été enregistrés.")}catch(error){setMessage(error instanceof Error?error.message:"L’ajout a échoué. Réessayez.")}finally{setBusy(false)}};
  const downloadDetails=async()=>{try{const result=await api({action:"dailyDetails",workDate:reportDate});if(!result.detail)throw new Error("Enregistrez d’abord les détails de cette journée");downloadDailyDetailsPdf(result.detail as DailyDetail,result.entries||[])}catch(error){setMessage(error instanceof Error?error.message:"Téléchargement impossible")}};
@@ -97,6 +100,15 @@ function AdminApp(){
     <section className="card report-card">
       <div className="cardhead"><span>1</span><div><h2>Heures des employés</h2><p>Calcul automatique et correction des pointages.</p></div></div>
       <div className="report-tools"><label>Date<input type="date" value={reportDate} onChange={e=>setReportDate(e.target.value)}/></label><button disabled={busy} onClick={downloadReport}>{busy?"Chargement…":"↓ Télécharger le PDF"}</button></div>
+      <form className="manual-hours-form" onSubmit={addManualHours}>
+        <div className="manual-hours-heading"><h3>AJOUTER DES HEURES</h3><p>Choisissez un employé et saisissez ses heures pour la date sélectionnée. Un départ après minuit est accepté.</p></div>
+        <div className="manual-hours-fields">
+          <label>Nom et prénom<select required value={manualHours.employeeId} onChange={e=>setManualHours({...manualHours,employeeId:e.target.value})}><option value="">Sélectionner un employé</option>{team.filter(p=>p.id).map(p=><option key={p.id} value={p.id}>{p.last} {p.first}</option>)}</select></label>
+          <label>Arrivée<input required type="time" value={manualHours.arrival} onChange={e=>setManualHours({...manualHours,arrival:e.target.value})}/></label>
+          <label>Départ<input required type="time" value={manualHours.departure} onChange={e=>setManualHours({...manualHours,departure:e.target.value})}/></label>
+          <button type="submit" disabled={busy||!manualHours.employeeId||!manualHours.arrival||!manualHours.departure}>{busy?"Enregistrement…":"＋ Ajouter les heures"}</button>
+        </div>
+      </form>
       <div className="report-table"><table><thead><tr><th>Employé</th><th>Début 1</th><th>Fin 1</th><th>MIDI</th><th>Début 2</th><th>Fin 2</th><th>SOIR</th><th>Total</th></tr></thead><tbody>{team.map(p=>{const s=summary(p);return <tr key={`${p.first}-${p.last}`}><td>{s.name}</td><td>{s.start1}</td><td>{s.end1}</td><td>{s.hours1.toFixed(2)}</td><td>{s.start2}</td><td>{s.end2}</td><td>{s.hours2.toFixed(2)}</td><td><b>{(s.hours1+s.hours2).toFixed(2)}</b></td></tr>})}</tbody></table></div>
       <div className="attendance-editor">
         <h3>CORRIGER LES ARRIVÉES ET LES DÉPARTS</h3>

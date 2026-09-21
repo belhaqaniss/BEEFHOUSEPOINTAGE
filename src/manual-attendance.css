@@ -1,0 +1,11 @@
+.manual-hours-form{padding:18px 20px;border-bottom:1px solid var(--line);background:#fffaf9}
+.manual-hours-heading{margin-bottom:13px}
+.manual-hours-heading h3{margin:0 0 5px;color:#b51f2a;font-size:10px;letter-spacing:.13em}
+.manual-hours-heading p{margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+.manual-hours-fields{display:grid;grid-template-columns:minmax(180px,2fr) minmax(110px,1fr) minmax(110px,1fr) auto;gap:10px;align-items:end}
+.manual-hours-fields label{display:grid;gap:5px;color:#555b66;font-size:10px;font-weight:800}
+.manual-hours-fields input,.manual-hours-fields select{height:39px;width:100%;min-width:0;padding:8px;border:1px solid #dfe0e6;border-radius:8px;background:#fff;color:var(--ink);font:inherit}
+.manual-hours-fields input:focus,.manual-hours-fields select:focus{outline:2px solid #b51f2a33;border-color:#b51f2a}
+.manual-hours-fields button{min-height:39px;padding:8px 13px;border:0;border-radius:8px;background:#b51f2a;color:#fff;font-size:10px;font-weight:800;cursor:pointer}
+.manual-hours-fields button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:700px){.manual-hours-fields{grid-template-columns:1fr 1fr}.manual-hours-fields label:first-child,.manual-hours-fields button{grid-column:1/-1}.manual-hours-fields input,.manual-hours-fields select,.manual-hours-fields button{font-size:14px}}

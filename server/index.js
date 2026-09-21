@@ -9,6 +9,7 @@ import { createWhatsAppHandler } from "./whatsapp.js";
 import { createTelegramHandler } from "./telegram.js";
 import { buildEmployeeMonthReport } from "./employee-hours.js";
 import { assertPunchAllowed, businessWorkDate, punchAvailability, punchService } from "./attendance-rules.js";
+import { adjacentWorkDates, assertManualAttendanceAvailable, buildManualAttendance } from "./manual-attendance.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const envFile = join(root, "..", ".env");
@@ -401,6 +402,25 @@ const server = createServer(async (req, res) => {
       });
       const morningMinutes=employees.reduce((sum,employee)=>sum+employee.morningMinutes,0),eveningMinutes=employees.reduce((sum,employee)=>sum+employee.eveningMinutes,0);
       return json(res,200,{success:true,month,employees,morningMinutes,eveningMinutes,totalMinutes:morningMinutes+eveningMinutes});
+    }
+    if (data.action === "addManualAttendance") {
+      const current=requireOperationalAdmin(req),employeeId=Number(data.employeeId);
+      if(!Number.isInteger(employeeId)||employeeId<=0)throw new Error("Sélectionnez un employé");
+      const employee=db.prepare("SELECT id,first_name AS first,last_name AS last FROM employees WHERE id=? AND active=1").get(employeeId);
+      if(!employee)throw Object.assign(new Error("Employé introuvable ou inactif"),{status:404});
+      const manual=buildManualAttendance({workDate:String(data.workDate||""),arrival:String(data.arrival||""),departure:String(data.departure||"")});
+      const [previousDate,nextDate]=adjacentWorkDates(manual.workDate);
+      db.exec("BEGIN IMMEDIATE");
+      try{
+        const existing=db.prepare("SELECT id,type,timestamp,work_date AS workDate FROM attendance WHERE employee_id=? AND work_date BETWEEN ? AND ? ORDER BY work_date,timestamp,id").all(employeeId,previousDate,nextDate);
+        assertManualAttendanceAvailable(existing,manual);
+        const insert=db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)");
+        const note=`Saisie manuelle par ${current.username}`;
+        const arrivalResult=insert.run(employeeId,"Arrivée",manual.arrivalTimestamp,manual.workDate,manual.service,note);
+        const departureResult=insert.run(employeeId,"Départ",manual.departureTimestamp,manual.workDate,manual.service,note);
+        db.exec("COMMIT");
+        return json(res,200,{success:true,employee,workDate:manual.workDate,service:manual.service,arrivalId:Number(arrivalResult.lastInsertRowid),departureId:Number(departureResult.lastInsertRowid)});
+      }catch(error){db.exec("ROLLBACK");throw error}
     }
     if (data.action === "updateAttendance") {
       requireOperationalAdmin(req);
