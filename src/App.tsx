@@ -24,7 +24,7 @@ type AttendanceRecord={id:number;name:string;type:"Arrivée"|"Départ";timestamp
 type AttendancePair={name:string;index:number;arrival?:AttendanceRecord;departure?:AttendanceRecord};
 type AppTab="pointage"|"qr"|"commande"|"feedback"|"details"|"hours"|"pourboire"|"responsable"|"superadmin"|"hyperadmin";
 const defaultPeople:Person[]=[
- {first:"Amélie",last:"Martin",role:"Accueil",color:"coral"},{first:"Amine",last:"Bensaïd",role:"Caisse",color:"purple"},{first:"Ambre",last:"Dupont",role:"Service",color:"blue"},{first:"Camille",last:"Robert",role:"Caisse",color:"green"},{first:"Lucas",last:"Bernard",role:"Service",color:"amber"},{first:"Sarah",last:"Petit",role:"Accueil",color:"pink"},{first:"Aniss",last:"Belhaq",role:"Salle",color:"blue"}
+ {first:"Sarah",last:"Petit",role:"Accueil",color:"pink"},{first:"Aniss",last:"Belhaq",role:"Salle",color:"blue"}
 ];
 const storedAuth=(key:string)=>localStorage.getItem(key)||sessionStorage.getItem(key);
 const api=async(data:object)=>{const token=storedAuth("presence-token");const response=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(data)}),raw=await response.text();let result:any;try{result=JSON.parse(raw)}catch{throw new Error(`Réponse invalide du serveur (${response.status}). Vérifiez VITE_API_URL.`)}if(!response.ok||result?.success===false)throw new Error(result.message||"Erreur du serveur");return result;};
