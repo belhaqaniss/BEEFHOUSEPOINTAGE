@@ -1,5 +1,5 @@
 export type DailyDetail={workDate:string;cashierMorning:string;cashierEvening:string;fdcMorning:string;fdcEvening:string;fdcFinal:string;cbAmount:string;cashAmount:string;totalAmount:string};
-export type DailyEntry={kind:"depense"|"offert";label:string;amount:number;note?:string};
+export type DailyEntry={kind:"depense"|"offert"|"erreur";label:string;amount:number;note?:string};
 
 const ascii=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\x20-\x7E]/g,"-");
 const esc=(value:string)=>ascii(value).replace(/([\\()])/g,"\\$1");
@@ -8,7 +8,7 @@ const line=(x1:number,y1:number,x2:number,y2:number)=>`0.55 0.55 0.58 RG 0.7 w $
 const money=(amount:number)=>`${amount.toFixed(2)} EUR`;
 
 export function buildDailyDetailsPdf(detail:DailyDetail,entries:DailyEntry[]){
-  const expenses=entries.filter(entry=>entry.kind==="depense"),offers=entries.filter(entry=>entry.kind==="offert");
+  const expenses=entries.filter(entry=>entry.kind==="depense"),offers=entries.filter(entry=>entry.kind==="offert"),errors=entries.filter(entry=>entry.kind==="erreur");
   let stream=text(162,790,20,"Detail journalier Beef House",true,"0.70 0.08 0.12")+line(155,784,442,784);
   stream+=text(72,744,11,`Date : ${new Date(`${detail.workDate}T12:00:00`).toLocaleDateString("fr-FR")}`,true);
   stream+=text(72,710,11,`Caissier matin : ${detail.cashierMorning}`)+text(72,681,11,`Caissier soir : ${detail.cashierEvening}`);
@@ -17,6 +17,8 @@ export function buildDailyDetailsPdf(detail:DailyDetail,entries:DailyEntry[]){
   if(!expenses.length){stream+=text(88,y,10,"Aucune depense");y-=22}else for(const entry of expenses){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
   y-=8;stream+=text(72,y,12,"OFFERTS",true,"0.70 0.08 0.12");y-=25;
   if(!offers.length){stream+=text(88,y,10,"Aucun offert");y-=22}else for(const entry of offers){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
+  y-=8;stream+=text(72,y,12,"ERREURS",true,"0.70 0.08 0.12");y-=25;
+  if(!errors.length){stream+=text(88,y,10,"Aucune erreur");y-=22}else for(const entry of errors){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
   const closureTop=Math.max(165,y-12);
   stream+=line(72,closureTop,523,closureTop)+text(72,closureTop-32,11,`FDC final : ${detail.fdcFinal}`,true)+text(72,closureTop-62,11,`CB : ${detail.cbAmount}`)+text(72,closureTop-87,11,`ESP : ${detail.cashAmount}`)+text(72,closureTop-122,13,`TOTAL : ${detail.totalAmount}`,true,"0.70 0.08 0.12");
   stream+=text(72,35,7,"Document genere depuis BEEF HOUSE")+text(430,35,7,new Date().toLocaleString("fr-FR"));

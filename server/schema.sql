@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS daily_details (
 CREATE TABLE IF NOT EXISTS financial_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_date TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('depense', 'offert')),
+  kind TEXT NOT NULL CHECK (kind IN ('depense', 'offert', 'erreur')),
   label TEXT NOT NULL,
   amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
   note TEXT,

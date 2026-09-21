@@ -51,6 +51,33 @@ for (const [name, definition] of [
   ["cash_amount", "TEXT NOT NULL DEFAULT ''"], ["total_amount", "TEXT NOT NULL DEFAULT ''"],
   ["created_by", "INTEGER REFERENCES admins(id)"]
 ]) if (!detailColumns.some(column => column.name === name)) db.exec(`ALTER TABLE daily_details ADD COLUMN ${name} ${definition}`);
+const initialFinancialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
+if(!initialFinancialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
+const financialTableSql=String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='financial_entries'").get()?.sql||"");
+if(!financialTableSql.includes("'erreur'")){
+  db.exec("PRAGMA foreign_keys=OFF");
+  try{
+    db.exec(`BEGIN;
+      CREATE TABLE financial_entries_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_date TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('depense', 'offert', 'erreur')),
+        label TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+        note TEXT,
+        source_detail INTEGER NOT NULL DEFAULT 0 CHECK (source_detail IN (0, 1)),
+        created_by INTEGER REFERENCES admins(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO financial_entries_new(id,entry_date,kind,label,amount_cents,note,source_detail,created_by,created_at)
+      SELECT id,entry_date,kind,label,amount_cents,note,source_detail,created_by,created_at FROM financial_entries;
+      DROP TABLE financial_entries;
+      ALTER TABLE financial_entries_new RENAME TO financial_entries;
+      COMMIT;`);
+  }catch(error){try{db.exec("ROLLBACK")}catch{}throw error}
+  finally{db.exec("PRAGMA foreign_keys=ON")}
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_financial_entries_date ON financial_entries(entry_date,kind)");
 const financialColumns=db.prepare("PRAGMA table_info(financial_entries)").all();
 if(!financialColumns.some(column=>column.name==="source_detail"))db.exec("ALTER TABLE financial_entries ADD COLUMN source_detail INTEGER NOT NULL DEFAULT 0");
 const scheduleColumns=db.prepare("PRAGMA table_info(schedule_blocks)").all();
@@ -361,7 +388,7 @@ const server = createServer(async (req, res) => {
         db.prepare("INSERT INTO daily_details(work_date,cashier_morning,cashier_evening,fdc_morning,fdc_evening,fdc_final,cb_amount,cash_amount,total_amount,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)").run(workDate,String(data.cashierMorning||""),String(data.cashierEvening||""),String(data.fdcMorning||""),String(data.fdcEvening||""),String(data.fdcFinal||""),String(data.cbAmount||""),String(data.cashAmount||""),String(data.totalAmount||""),current.id);
         db.prepare("DELETE FROM financial_entries WHERE entry_date=? AND source_detail=1").run(workDate);
         const insert=db.prepare("INSERT INTO financial_entries(entry_date,kind,label,amount_cents,note,source_detail,created_by) VALUES(?,?,?,?,?,1,?)");
-        for(const entry of entries){const label=String(entry.label||"").trim(),amount=Number(entry.amount),kind=entry.kind==="offert"?"offert":"depense";if(label&&Number.isFinite(amount)&&amount>=0)insert.run(workDate,kind,label,Math.round(amount*100),String(entry.note||"").trim(),current.id);}
+        for(const entry of entries){const label=String(entry.label||"").trim(),amount=Number(entry.amount),kind=["depense","offert","erreur"].includes(entry.kind)?entry.kind:"depense";if(label&&Number.isFinite(amount)&&amount>=0)insert.run(workDate,kind,label,Math.round(amount*100),String(entry.note||"").trim(),current.id);}
         db.exec("COMMIT");
       } catch(error){db.exec("ROLLBACK");throw error;}
       return json(res,200,{success:true});
@@ -478,11 +505,11 @@ const server = createServer(async (req, res) => {
       const leaveRequests=db.prepare("SELECT l.id,l.start_date AS startDate,l.end_date AS endDate,l.reason,l.status,l.reviewed_at AS reviewedAt,l.created_at AS createdAt,e.id AS employeeId,e.first_name AS first,e.last_name AS last,e.role,a.username AS reviewedBy FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN admins a ON a.id=l.reviewed_by ORDER BY CASE l.status WHEN 'pending' THEN 0 ELSE 1 END,l.start_date,l.created_at DESC LIMIT 100").all();
       const month=today.slice(0,7);
       const financialTotals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE substr(entry_date,1,7)=? GROUP BY kind").all(month);
-      const expenseCents=financialTotals.find(row=>row.kind==="depense")?.cents||0,offeredCents=financialTotals.find(row=>row.kind==="offert")?.cents||0;
+      const expenseCents=financialTotals.find(row=>row.kind==="depense")?.cents||0,offeredCents=financialTotals.find(row=>row.kind==="offert")?.cents||0,errorCents=financialTotals.find(row=>row.kind==="erreur")?.cents||0;
       const financialDays=[];
       for(let offset=6;offset>=0;offset--){const date=new Date(`${today}T12:00:00`);date.setDate(date.getDate()-offset);const key=date.toISOString().slice(0,10);const totals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE entry_date=? GROUP BY kind").all(key);financialDays.push({date:key,depense:(totals.find(row=>row.kind==="depense")?.cents||0)/100,offert:(totals.find(row=>row.kind==="offert")?.cents||0)/100});}
       const financialRecent=db.prepare("SELECT f.id,f.entry_date AS date,f.kind,f.label,f.amount_cents/100.0 AS amount,f.note,a.username AS createdBy FROM financial_entries f LEFT JOIN admins a ON a.id=f.created_by ORDER BY f.entry_date DESC,f.id DESC LIMIT 10").all();
-      return json(res,200,{success:true,stats,recent,admins,employees:allEmployees,leaveRequests,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,days:financialDays,recent:financialRecent}});
+      return json(res,200,{success:true,stats,recent,admins,employees:allEmployees,leaveRequests,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,errorTotal:errorCents/100,days:financialDays,recent:financialRecent}});
     }
     if(data.action==="reviewLeaveRequest"){
       const current=requireSuperAdmin(req),id=Number(data.id),status=String(data.status||"");
@@ -517,7 +544,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "addFinancialEntry") {
-      const current=requireSuperAdmin(req),kind=data.kind==="offert"?"offert":"depense",label=String(data.label||"").trim(),amount=Number(data.amount),date=String(data.date||new Date().toISOString().slice(0,10));
+      const current=requireSuperAdmin(req),kind=["depense","offert","erreur"].includes(data.kind)?data.kind:"depense",label=String(data.label||"").trim(),amount=Number(data.amount),date=String(data.date||new Date().toISOString().slice(0,10));
       if(!label||!Number.isFinite(amount)||amount<=0) throw new Error("Libellé et montant positif obligatoires");
       db.prepare("INSERT INTO financial_entries(entry_date,kind,label,amount_cents,note,created_by) VALUES(?,?,?,?,?,?)").run(date,kind,label,Math.round(amount*100),String(data.note||"").trim(),current.id);
       return json(res,200,{success:true});

@@ -14,7 +14,7 @@ export const previousParisDate=()=>{
 };
 
 export const buildDailyDetailsPdf=(detail,entries)=>{
-  const expenses=entries.filter(entry=>entry.kind==="depense"),offers=entries.filter(entry=>entry.kind==="offert"),money=amount=>`${Number(amount).toFixed(2)} EUR`;
+  const expenses=entries.filter(entry=>entry.kind==="depense"),offers=entries.filter(entry=>entry.kind==="offert"),errors=entries.filter(entry=>entry.kind==="erreur"),money=amount=>`${Number(amount).toFixed(2)} EUR`;
   let stream=text(162,790,20,"Detail journalier Beef House",true,"0.70 0.08 0.12")+line(155,784,442,784);
   stream+=text(72,744,11,`Date : ${detail.workDate.split("-").reverse().join("/")}`,true)+text(72,710,11,`Caissier matin : ${detail.cashierMorning}`)+text(72,681,11,`Caissier soir : ${detail.cashierEvening}`);
   stream+=text(72,640,11,`FDC initial / matin : ${detail.fdcMorning}`,true)+text(310,640,11,`FDC soir : ${detail.fdcEvening}`,true);
@@ -22,6 +22,8 @@ export const buildDailyDetailsPdf=(detail,entries)=>{
   if(!expenses.length){stream+=text(88,y,10,"Aucune depense");y-=22}else for(const entry of expenses){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
   y-=8;stream+=text(72,y,12,"OFFERTS",true,"0.70 0.08 0.12");y-=25;
   if(!offers.length){stream+=text(88,y,10,"Aucun offert");y-=22}else for(const entry of offers){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
+  y-=8;stream+=text(72,y,12,"ERREURS",true,"0.70 0.08 0.12");y-=25;
+  if(!errors.length){stream+=text(88,y,10,"Aucune erreur");y-=22}else for(const entry of errors){stream+=text(88,y,10,`- ${entry.label}${entry.note?` (${entry.note})`:""}`)+text(450,y,10,money(entry.amount),true);y-=22}
   const top=Math.max(165,y-12);stream+=line(72,top,523,top)+text(72,top-32,11,`FDC final : ${detail.fdcFinal}`,true)+text(72,top-62,11,`CB : ${detail.cbAmount}`)+text(72,top-87,11,`ESP : ${detail.cashAmount}`)+text(72,top-122,13,`TOTAL : ${detail.totalAmount}`,true,"0.70 0.08 0.12");
   return pdfDocument(stream);
 };
