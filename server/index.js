@@ -260,6 +260,11 @@ const server = createServer(async (req, res) => {
       const items=db.prepare("SELECT f.id,f.feedback_date AS feedbackDate,f.feedback_time AS feedbackTime,f.table_number AS tableNumber,f.feedback,f.created_at AS createdAt,COALESCE(a.username,'Compte supprimé') AS createdBy FROM customer_feedback f LEFT JOIN admins a ON a.id=f.created_by WHERE f.feedback_date=? ORDER BY f.feedback_time DESC,f.id DESC").all(feedbackDate);
       return json(res,200,{success:true,feedbackDate,items});
     }
+    if(data.action==="allCustomerFeedback"){
+      requireSuperAdmin(req);
+      const items=db.prepare("SELECT f.id,f.feedback_date AS feedbackDate,f.feedback_time AS feedbackTime,f.table_number AS tableNumber,f.feedback,f.created_at AS createdAt,COALESCE(a.username,'Compte supprimé') AS createdBy FROM customer_feedback f LEFT JOIN admins a ON a.id=f.created_by ORDER BY f.feedback_date DESC,f.feedback_time DESC,f.id DESC").all();
+      return json(res,200,{success:true,total:items.length,items});
+    }
     if(data.action==="createCustomerFeedback"){
       const current=requireOperationalAdmin(req),feedbackDate=String(data.feedbackDate||""),feedbackTime=String(data.feedbackTime||""),tableNumber=String(data.tableNumber||"").trim(),feedback=String(data.feedback||"").trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(feedbackDate)||Number.isNaN(new Date(`${feedbackDate}T12:00:00Z`).getTime()))throw new Error("Date invalide");
@@ -328,7 +333,15 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "toggleRestaurant") { requireHyperAdmin(req);const id=Number(data.id);db.prepare("UPDATE restaurants SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?").run(id);return json(res,200,{success:true}); }
     if (data.action === "addEmployee") { requireAdmin(req); const first=String(data.first||"").trim(),last=String(data.last||"").trim(),role=String(data.role||"").trim();if(!first||!last||!role)throw new Error("Prénom, nom et poste obligatoires");db.prepare("INSERT INTO employees(first_name,last_name,role,color) VALUES(?,?,?,?) ON CONFLICT(first_name,last_name) DO UPDATE SET role=excluded.role,color=excluded.color,active=1").run(first,last,role,String(data.color||"blue"));const employee=db.prepare("SELECT id FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").get(first,last);const username=ensureEmployeeAccount(employee.id); return json(res,200,{success:true,username,employees:employees()}); }
-    if (data.action === "deleteEmployee") { requireTeamManager(req); const id=Number(data.id);if(Number.isInteger(id))db.prepare("UPDATE employees SET active=0 WHERE id=?").run(id);else db.prepare("UPDATE employees SET active=0 WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)").run(String(data.first),String(data.last)); return json(res,200,{success:true,employees:employees()}); }
+    if (data.action === "deleteEmployee") {
+      requireTeamManager(req);
+      const id=Number(data.id),employee=Number.isInteger(id)?db.prepare("SELECT id,first_name AS first,last_name AS last FROM employees WHERE id=? AND active=1").get(id):db.prepare("SELECT id,first_name AS first,last_name AS last FROM employees WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND active=1").get(String(data.first||""),String(data.last||""));
+      if(!employee)throw Object.assign(new Error("Employé introuvable ou déjà supprimé"),{status:404});
+      db.exec("BEGIN");
+      try{db.prepare("UPDATE employees SET active=0 WHERE id=?").run(employee.id);db.prepare("DELETE FROM employee_sessions WHERE employee_id=?").run(employee.id);db.exec("COMMIT")}
+      catch(error){db.exec("ROLLBACK");throw error}
+      return json(res,200,{success:true,employee,employees:employees()});
+    }
     if (data.action === "pointage") {
       requireManualPointageAccess(req,data);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name));
