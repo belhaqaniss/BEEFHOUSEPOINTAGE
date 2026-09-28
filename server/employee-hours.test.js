@@ -4,6 +4,19 @@ import { buildEmployeeMonthReport, buildEmployeeRangeReport } from "./employee-h
 
 const event = (id, workDate, type, timestamp) => ({ id, workDate, type, timestamp });
 
+test("un extra reste calculé sur les heures réelles même si le planning indique le matin", () => {
+  const events=[
+    {...event(1,"2026-09-27","Arrivée","2026-09-27T18:00:00Z"),scheduledStartMinutes:660,scheduledMorningStartMinutes:660,service:"matin"},
+    event(2,"2026-09-27","Départ","2026-09-27T22:20:00Z")
+  ];
+  const report=buildEmployeeMonthReport(events,"2026-09","2026-09-28");
+  assert.equal(report.eveningMinutes,260);
+  assert.equal(report.morningMinutes,0);
+  assert.equal(report.days[26].minutes,260);
+  assert.equal(report.days[27].minutes,0);
+  assert.equal(buildEmployeeRangeReport(events,"2026-09-21","2026-09-27").eveningMinutes,260);
+});
+
 test("détaille seulement les services terminés du salarié et du mois demandé", () => {
   const report = buildEmployeeMonthReport([
     event(1, "2026-09-02", "Arrivée", "2026-09-02T08:00:00.000Z"),

@@ -27,6 +27,24 @@ const parisTimestamp = (date, time) => {
   throw new Error("Cette heure n’existe pas dans le fuseau Europe/Paris");
 };
 
+export const attendanceClock = timestamp => {
+  const parts = parisFormatter.formatToParts(new Date(timestamp));
+  return `${parts.find(part => part.type === "hour").value}:${parts.find(part => part.type === "minute").value}`;
+};
+
+// Corrections are anchored to the service date, never to a schedule or the browser's date/timezone.
+export const correctedAttendanceTimestamp = ({ workDate, type, time, arrivalTimestamp }, now = new Date()) => {
+  if (!datePattern.test(workDate) || !timePattern.test(time)) throw new Error("Date ou heure invalide");
+  if (type === "Départ" && arrivalTimestamp) {
+    if (businessWorkDate(arrivalTimestamp) !== workDate) throw new Error("Corrigez d’abord la date de l’arrivée");
+    return buildManualAttendance({ workDate, arrival: attendanceClock(arrivalTimestamp), departure: time }, now).departureTimestamp;
+  }
+  const calendarDate = shiftDate(workDate, Number(time.slice(0, 2)) < 7 ? 1 : 0);
+  const timestamp = parisTimestamp(calendarDate, time);
+  if (Date.parse(timestamp) > new Date(now).getTime()) throw new Error("Le pointage ne peut pas être dans le futur");
+  return timestamp;
+};
+
 export const buildManualAttendance = ({ workDate, arrival, departure }, now = new Date()) => {
   const parsedDate = Date.parse(`${workDate}T12:00:00Z`);
   if (!datePattern.test(workDate) || !Number.isFinite(parsedDate) || new Date(parsedDate).toISOString().slice(0, 10) !== workDate) {

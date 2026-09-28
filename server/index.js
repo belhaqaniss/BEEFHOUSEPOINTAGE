@@ -9,7 +9,7 @@ import { createWhatsAppHandler } from "./whatsapp.js";
 import { createTelegramHandler } from "./telegram.js";
 import { buildEmployeeMonthReport, buildEmployeeRangeReport } from "./employee-hours.js";
 import { assertPunchAllowed, businessWorkDate, punchAvailability, punchService } from "./attendance-rules.js";
-import { adjacentWorkDates, assertManualAttendanceAvailable, buildManualAttendance } from "./manual-attendance.js";
+import { adjacentWorkDates, assertManualAttendanceAvailable, buildManualAttendance, attendanceClock, correctedAttendanceTimestamp } from "./manual-attendance.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const envFile = join(root, "..", ".env");
@@ -171,7 +171,7 @@ const employees = () => db.prepare("SELECT id,first_name AS first,last_name AS l
 const parisDate=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(timestamp)),part=type=>parts.find(item=>item.type===type)?.value;return `${part("year")}-${part("month")}-${part("day")}`};
 const parisMinutes=timestamp=>{const parts=new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(timestamp)),hour=Number(parts.find(part=>part.type==="hour")?.value||0),minute=Number(parts.find(part=>part.type==="minute")?.value||0);return (hour<7?hour+24:hour)*60+minute};
 const pointageService=punchService;
-const nextPointageService=(employeeId,workDate,timestamp)=>{const service=pointageService(timestamp),scheduled=db.prepare("SELECT MIN(start_minutes) AS startMinutes FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employeeId,workDate,service);return {service,scheduledStartMinutes:scheduled?.startMinutes??null};};
+const nextPointageService=timestamp=>({service:pointageService(timestamp),scheduledStartMinutes:null});
 const tipOverview = workDate => {
   const day=db.prepare("SELECT work_date AS workDate,morning_cents/100.0 AS morningAmount,evening_cents/100.0 AS eveningAmount FROM tip_days WHERE work_date=?").get(workDate)||{workDate,morningAmount:0,eveningAmount:0};
   const allocations=db.prepare("SELECT id,work_date AS workDate,service,recipient_key AS recipientKey,recipient_name AS recipientName,amount_cents/100.0 AS amount,claimed,claimed_at AS claimedAt,(SELECT COALESCE(SUM(other.amount_cents),0)/100.0 FROM tip_allocations other WHERE other.recipient_key=tip_allocations.recipient_key AND other.claimed=0) AS accumulated FROM tip_allocations WHERE work_date=? ORDER BY service,recipient_name").all(workDate).map(row=>({...row,claimed:Boolean(row.claimed)}));
@@ -283,7 +283,7 @@ const server = createServer(async (req, res) => {
         if(!scan)throw Object.assign(new Error("Cette autorisation de pointage a expiré ou a déjà été utilisée."),{status:410});
         const lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id);
         assertPunchAllowed(lastEvent,now);
-        const mode=lastEvent?.type==="Arrivée"?"Départ":"Arrivée",workDate=mode==="Départ"?lastEvent.workDate:businessWorkDate(now),planned=mode==="Arrivée"?nextPointageService(employee.id,workDate,now):{service:lastEvent?.service||"matin",scheduledStartMinutes:null};
+        const mode=lastEvent?.type==="Arrivée"?"Départ":"Arrivée",workDate=mode==="Départ"?lastEvent.workDate:businessWorkDate(now),planned=mode==="Arrivée"?nextPointageService(now):{service:pointageService(lastEvent.timestamp),scheduledStartMinutes:null};
         db.prepare("UPDATE attendance_scan_sessions SET employee_id=?,used_at=? WHERE token_hash=? AND used_at IS NULL").run(employee.id,now,scanHash);
         db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,mode,now,workDate,planned.service,signature);
         db.exec("COMMIT");
@@ -354,7 +354,7 @@ const server = createServer(async (req, res) => {
         assertPunchAllowed(lastEvent,now);
         if(mode==="Arrivée"&&lastEvent?.type==="Arrivée") throw Object.assign(new Error("Cette personne a déjà pointé son arrivée. Enregistrez d’abord son départ."),{status:409});
         if(mode==="Départ"&&lastEvent?.type!=="Arrivée") throw Object.assign(new Error("Aucune arrivée ouverte pour cette personne."),{status:409});
-        const workDate=mode==="Départ"?lastEvent.workDate:businessWorkDate(now),planned=mode==="Arrivée"?nextPointageService(employee.id,workDate,now):{service:lastEvent.service||"matin",scheduledStartMinutes:null};
+        const workDate=mode==="Départ"?lastEvent.workDate:businessWorkDate(now),planned=mode==="Arrivée"?nextPointageService(now):{service:pointageService(lastEvent.timestamp),scheduledStartMinutes:null};
         db.prepare("INSERT INTO attendance(employee_id,type,timestamp,work_date,service,signature) VALUES(?,?,?,?,?,?)").run(employee.id,mode,now,workDate,planned.service,String(data.signature||""));
         db.exec("COMMIT");
         return json(res,200,{success:true,workDate,shift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes});
@@ -364,7 +364,7 @@ const server = createServer(async (req, res) => {
       requireManualPointageAccess(req,data);
       const employee=db.prepare("SELECT id FROM employees WHERE active=1 AND lower(first_name||' '||last_name)=lower(?)").get(String(data.name||""));
       if(!employee) throw Object.assign(new Error("Employé introuvable"),{status:404});
-      const now=new Date().toISOString(),lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null,availability=punchAvailability(lastEvent,now),workDate=businessWorkDate(now),planned=lastEvent?.type==="Arrivée"?{service:lastEvent.service,scheduledStartMinutes:db.prepare("SELECT MIN(start_minutes) AS value FROM schedule_blocks WHERE employee_id=? AND work_date=? AND service=?").get(employee.id,lastEvent.workDate,lastEvent.service).value}:nextPointageService(employee.id,workDate,now);
+      const now=new Date().toISOString(),lastEvent=db.prepare("SELECT type,service,work_date AS workDate,timestamp FROM attendance WHERE employee_id=? ORDER BY timestamp DESC,id DESC LIMIT 1").get(employee.id)||null,availability=punchAvailability(lastEvent,now),workDate=businessWorkDate(now),planned=lastEvent?.type==="Arrivée"?{service:pointageService(lastEvent.timestamp),scheduledStartMinutes:null}:nextPointageService(now);
       return json(res,200,{success:true,hasOpenArrival:lastEvent?.type==="Arrivée",nextShift:planned.service,scheduledStartMinutes:planned.scheduledStartMinutes,lastEvent,punchBlockedReason:availability.blockedReason});
     }
     if (data.action === "tipOverview") {
@@ -428,8 +428,8 @@ const server = createServer(async (req, res) => {
     if (data.action === "deleteOrderSplit") {
       requireOperationalAdmin(req);db.prepare("DELETE FROM order_splits WHERE id=?").run(Number(data.id));return json(res,200,{success:true});
     }
-    if (data.action === "report") { requirePointageAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
-    if (data.action === "exportAttendance") { requireNonResponsableAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service=a.service) AS scheduledStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='matin') AS scheduledMorningStartMinutes,(SELECT MIN(sb.start_minutes) FROM schedule_blocks sb WHERE sb.employee_id=a.employee_id AND sb.work_date=a.work_date AND sb.service='soir') AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "report") { requirePointageAdmin(req); const rows=db.prepare("SELECT a.id,e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,NULL AS scheduledStartMinutes,NULL AS scheduledMorningStartMinutes,NULL AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
+    if (data.action === "exportAttendance") { requireNonResponsableAdmin(req); const rows=db.prepare("SELECT e.first_name||' '||e.last_name AS name,a.type,a.timestamp,a.work_date AS workDate,a.service,NULL AS scheduledStartMinutes,NULL AS scheduledMorningStartMinutes,NULL AS scheduledEveningStartMinutes FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=? ORDER BY e.first_name,a.timestamp").all(String(data.workDate)); return json(res,200,{success:true,records:rows}); }
     if (data.action === "monthlyHours") {
       requireSuperAdmin(req);
       const month=String(data.month||"");
@@ -480,22 +480,25 @@ const server = createServer(async (req, res) => {
     }
     if (data.action === "updateAttendance") {
       requireOperationalAdmin(req);
-      const id=Number(data.id),timestamp=String(data.timestamp||""),parsed=new Date(timestamp);
-      if(!Number.isInteger(id)||Number.isNaN(parsed.getTime())) throw new Error("Heure de pointage invalide");
+      const id=Number(data.id);
+      if(!Number.isInteger(id)) throw new Error("Heure de pointage invalide");
       const record=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type,timestamp,service FROM attendance WHERE id=?").get(id);
       if(!record) throw Object.assign(new Error("Pointage introuvable"),{status:404});
+      const arrival=record.type==="Départ"?db.prepare("SELECT timestamp,type FROM attendance WHERE employee_id=? AND work_date=? AND (timestamp<? OR (timestamp=? AND id<?)) ORDER BY timestamp DESC,id DESC LIMIT 1").get(record.employeeId,record.workDate,record.timestamp,record.timestamp,id):null;
+      const parsed=new Date(correctedAttendanceTimestamp({workDate:record.workDate,type:record.type,time:data.time||attendanceClock(data.timestamp),arrivalTimestamp:arrival?.type==="Arrivée"?arrival.timestamp:undefined}));
       if(record.type==="Arrivée"){
         const departure=db.prepare("SELECT id,timestamp FROM attendance WHERE employee_id=? AND work_date=? AND service=? AND type='Départ' AND (timestamp>? OR (timestamp=? AND id>?)) ORDER BY timestamp,id LIMIT 1").get(record.employeeId,record.workDate,record.service,record.timestamp,record.timestamp,record.id),service=pointageService(parsed.toISOString());
-        if(departure&&parsed.getTime()>=new Date(departure.timestamp).getTime())throw new Error("L’arrivée doit être antérieure au départ");
+        if(departure&&(new Date(departure.timestamp).getTime()-parsed.getTime()<300000||new Date(departure.timestamp).getTime()-parsed.getTime()>20*3600000))throw new Error("La durée doit être comprise entre 5 minutes et 20 heures");
         db.exec("BEGIN");try{db.prepare("UPDATE attendance SET timestamp=?,service=? WHERE id=?").run(parsed.toISOString(),service,id);if(departure)db.prepare("UPDATE attendance SET service=? WHERE id=?").run(service,departure.id);db.exec("COMMIT")}catch(error){db.exec("ROLLBACK");throw error}
       }else db.prepare("UPDATE attendance SET timestamp=? WHERE id=?").run(parsed.toISOString(),id);
       return json(res,200,{success:true});
     }
     if (data.action === "addManualDeparture") {
-      const current=requireOperationalAdmin(req),arrivalId=Number(data.arrivalId),timestamp=String(data.timestamp||""),parsed=new Date(timestamp);
-      if(!Number.isInteger(arrivalId)||Number.isNaN(parsed.getTime())) throw new Error("Heure de départ invalide");
+      const current=requireOperationalAdmin(req),arrivalId=Number(data.arrivalId);
+      if(!Number.isInteger(arrivalId)) throw new Error("Heure de départ invalide");
       const arrival=db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,service,timestamp FROM attendance WHERE id=? AND type='Arrivée'").get(arrivalId);
       if(!arrival) throw Object.assign(new Error("Arrivée introuvable"),{status:404});
+      const parsed=new Date(correctedAttendanceTimestamp({workDate:arrival.workDate,type:"Départ",time:data.time||attendanceClock(data.timestamp),arrivalTimestamp:arrival.timestamp}));
       if(parsed.getTime()<=new Date(arrival.timestamp).getTime()) throw new Error("Le départ doit être postérieur à l’arrivée");
       const existing=db.prepare("SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND service=? AND type='Départ' AND timestamp>=? ORDER BY timestamp LIMIT 1").get(arrival.employeeId,arrival.workDate,arrival.service,arrival.timestamp);
       if(existing) throw Object.assign(new Error("Un départ existe déjà pour ce service"),{status:409});
