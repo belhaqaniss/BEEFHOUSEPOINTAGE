@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { canEditBrunch, createBrunchStore } from "./brunch.js";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -18,6 +19,7 @@ const dataDir = join(root, "data");
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, "presence.sqlite"));
 db.exec(readFileSync(join(root, "schema.sql"), "utf8"));
+const brunchStore = createBrunchStore(db);
 const adminsTableSql=String(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='admins'").get()?.sql||"");
 if(!adminsTableSql.includes("'responsable'")){
   db.exec("PRAGMA foreign_keys=OFF");
@@ -131,7 +133,7 @@ seedHyperAdmin();
 seedEmployees();
 syncEmployeeAccounts();
 
-const json = (res, status, body) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN || "*", "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" }); res.end(JSON.stringify(body)); };
+const json = (res, status, body, origin = process.env.ALLOWED_ORIGIN || "*") => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" }); res.end(JSON.stringify(body)); };
 const body = async req => { const chunks=[]; let size=0; for await (const chunk of req){size+=chunk.length;if(size>3_000_000)throw new Error("Requête trop volumineuse");chunks.push(chunk);} return chunks.length?JSON.parse(Buffer.concat(chunks).toString("utf8")):{}; };
 const adminFromRequest = req => {
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -188,9 +190,18 @@ const server = createServer(async (req, res) => {
   if (url.pathname === "/api/telegram/webhook") return telegram(req,res,url);
   if (url.pathname !== "/api" && url.pathname !== "/") return json(res, 404, { success:false, message:"Route introuvable" });
   try {
+    if (req.method === "GET" && url.searchParams.get("action") === "publicBrunch") {
+      res.setHeader("Cache-Control", "no-store");
+      return json(res, 200, {success:true,...brunchStore.read()}, "*");
+    }
     if (req.method === "GET" && (url.searchParams.get("action") || "employees") === "employees") return json(res, 200, employees());
     if (req.method !== "POST") return json(res, 405, { success:false, message:"Méthode refusée" });
     const data = await body(req);
+    if (data.action === "getBrunch" || data.action === "saveBrunch") {
+      const admin = requireSuperAdmin(req);
+      if (!canEditBrunch(admin)) throw Object.assign(new Error("Accès au brunch refusé"), {status:403});
+      return json(res,200,{success:true,...(data.action === "saveBrunch" ? brunchStore.save(admin,data.brunch,data.revision) : brunchStore.read())});
+    }
     if(data.action==="beginEmployeeScan"){
       const challenge=db.prepare("SELECT id,expires_at AS expiresAt FROM attendance_qr_challenges WHERE token_hash=? AND expires_at>?").get(hashToken(data.qrToken),new Date().toISOString());
       if(!challenge)throw Object.assign(new Error("Ce QR code a expiré. Scannez le nouveau code affiché."),{status:410});
@@ -521,7 +532,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,employees:allEmployees});
     }
     if (data.action === "superDashboard") {
-      requireSuperAdmin(req);
+      const brunchAccess = canEditBrunch(requireSuperAdmin(req));
       const today=String(data.workDate||parisDate(new Date()));
       const stats={
         activeEmployees:db.prepare("SELECT COUNT(*) AS value FROM employees WHERE active=1").get().value,
@@ -541,7 +552,7 @@ const server = createServer(async (req, res) => {
       const financialDays=[];
       for(let offset=6;offset>=0;offset--){const date=new Date(`${today}T12:00:00`);date.setDate(date.getDate()-offset);const key=date.toISOString().slice(0,10);const totals=db.prepare("SELECT kind,COALESCE(SUM(amount_cents),0) AS cents FROM financial_entries WHERE entry_date=? GROUP BY kind").all(key);financialDays.push({date:key,depense:(totals.find(row=>row.kind==="depense")?.cents||0)/100,offert:(totals.find(row=>row.kind==="offert")?.cents||0)/100});}
       const financialRecent=db.prepare("SELECT f.id,f.entry_date AS date,f.kind,f.label,f.amount_cents/100.0 AS amount,f.note,COALESCE(a.username,'Compte supprimé') AS createdBy FROM financial_entries f LEFT JOIN admins a ON a.id=f.created_by ORDER BY f.entry_date DESC,f.id DESC").all();
-      return json(res,200,{success:true,stats,recent,admins,employees:allEmployees,leaveRequests,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,errorTotal:errorCents/100,days:financialDays,recent:financialRecent}});
+      return json(res,200,{success:true,canEditBrunch:brunchAccess,stats,recent,admins,employees:allEmployees,leaveRequests,financial:{month,expenseTotal:expenseCents/100,offeredTotal:offeredCents/100,errorTotal:errorCents/100,days:financialDays,recent:financialRecent}});
     }
     if(data.action==="reviewLeaveRequest"){
       const current=requireSuperAdmin(req),id=Number(data.id),status=String(data.status||"");

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import "./finance.css";
 import Planning from "./Planning";
+import BrunchEditor from "./BrunchEditor";
 import "./super-employees.css";
 import { downloadDailyExcel } from "./dailyExcel";
 import { downloadDailyHoursPdf } from "./dailyHoursPdf";
@@ -11,6 +12,7 @@ import "./super-tabs.css";
 import { apiUrl } from "./apiUrl";
 
 type DashboardData = {
+  canEditBrunch?:boolean;
   stats: { activeEmployees:number; inactiveEmployees:number; todayEvents:number; activeSessions:number; administrators:number; customerFeedbackToday:number };
   recent: Array<{ name:string; type:string; timestamp:string; workDate:string }>;
   admins: Array<{ id:number; username:string; role:string; createdAt:string }>;
@@ -53,7 +55,7 @@ export default function SuperAdminDashboard(){
   const[editingEmployee,setEditingEmployee]=useState<{id:number;first:string;last:string}|null>(null);
   const[deletingEmployeeId,setDeletingEmployeeId]=useState<number|null>(null);
   const[exportDate,setExportDate]=useState(new Date().toLocaleDateString("en-CA")),[exportBusy,setExportBusy]=useState(false);
-  const[view,setView]=useState<"overview"|"planning"|"leave"|"feedback"|"finance"|"team">("overview");
+  const[view,setView]=useState<"overview"|"planning"|"leave"|"feedback"|"finance"|"team"|"brunch">("overview");
   const[hoursMonth,setHoursMonth]=useState(new Date().toLocaleDateString("en-CA").slice(0,7)),[monthlyHours,setMonthlyHours]=useState<MonthlyHoursReport|null>(null),[hoursLoading,setHoursLoading]=useState(false);
   const[weekStart,setWeekStart]=useState(()=>mondayIso(new Date().toLocaleDateString("en-CA"))),[weeklyHours,setWeeklyHours]=useState<WeeklyHoursReport|null>(null),[weeklyLoading,setWeeklyLoading]=useState(false);
   const[feedbackItems,setFeedbackItems]=useState<CustomerFeedback[]>([]),[feedbackLoading,setFeedbackLoading]=useState(false);
@@ -87,6 +89,8 @@ export default function SuperAdminDashboard(){
   const pendingLeaves=data.leaveRequests.filter(item=>item.status==="pending").length;
   return <section className={`super-dashboard view-${view}`}>
     <nav className="super-section-nav" aria-label="Sections du super administrateur"><button className={view==="overview"?"active":""} onClick={()=>setView("overview")}>⌂ Vue d’ensemble</button><button className={view==="finance"?"active":""} onClick={()=>setView("finance")}>€ Finances</button><button className={view==="feedback"?"active":""} onClick={()=>setView("feedback")}>★ Retours clients</button><button className={view==="leave"?"active":""} onClick={()=>setView("leave")}>☀ Congés{pendingLeaves?` (${pendingLeaves})`:""}</button><button className={view==="team"?"active":""} onClick={()=>setView("team")}>● Équipe et accès</button><button className={view==="planning"?"active":""} onClick={()=>setView("planning")}>▦ Planning</button></nav>
+    {data.canEditBrunch&&<button type="button" aria-pressed={view==="brunch"} onClick={()=>setView("brunch")}>☕ Brunch</button>}
+    {view==="brunch"&&data.canEditBrunch&&<BrunchEditor/>}
     {notice&&<div className="message">✓ &nbsp; {notice}<button onClick={()=>setNotice("")}>×</button></div>}
     {error&&<div className="super-alert">{error}<button onClick={()=>setError("")}>×</button></div>}
     <div hidden={view!=="overview"} className="super-stats">{cards.map(card=><article className={`stat-card ${card.tone}${card.onClick?" clickable":""}`} key={card.label} onClick={card.onClick} role={card.onClick?"button":undefined} tabIndex={card.onClick?0:undefined} onKeyDown={event=>{if(card.onClick&&(event.key==="Enter"||event.key===" "))card.onClick()}}><div><span>{card.label}</span><strong>{card.value}</strong></div><b>{card.icon}</b></article>)}</div>
