@@ -597,6 +597,14 @@ const server = createServer(async (req, res) => {
       db.prepare("DELETE FROM financial_entries WHERE id=?").run(Number(data.id));
       return json(res,200,{success:true});
     }
+    if (data.action === "updateFinancialEntry") {
+      requireSuperAdmin(req);
+      const id=Number(data.id),kind=String(data.kind||""),label=String(data.label||"").trim(),amount=Number(data.amount),note=String(data.note||"").trim();
+      if(!Number.isInteger(id)||id<=0||!["depense","offert","erreur"].includes(kind)||!label||label.length>300||!Number.isFinite(amount)||amount<0||!Number.isSafeInteger(Math.round(amount*100))||note.length>2100)throw Object.assign(new Error("Écriture financière invalide"),{status:400});
+      const result=db.prepare("UPDATE financial_entries SET kind=?,label=?,amount_cents=?,note=? WHERE id=?").run(kind,label,Math.round(amount*100),note,id);
+      if(!result.changes)throw Object.assign(new Error("Écriture introuvable"),{status:404});
+      return json(res,200,{success:true});
+    }
     if (data.action === "getSchedule") {
       requirePlanningAdmin(req);
       const start=String(data.weekStart||""),endDate=new Date(`${start}T12:00:00`);
