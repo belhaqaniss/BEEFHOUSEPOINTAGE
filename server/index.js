@@ -471,7 +471,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,weekStart,weekEnd,employees,morningMinutes,eveningMinutes,totalMinutes:morningMinutes+eveningMinutes});
     }
     if (data.action === "addManualAttendance") {
-      const current=requireOperationalAdmin(req),employeeId=Number(data.employeeId);
+      const current=requireManualPointageAccess(req,data),employeeId=Number(data.employeeId);
       if(!Number.isInteger(employeeId)||employeeId<=0)throw new Error("Sélectionnez un employé");
       const employee=db.prepare("SELECT id,first_name AS first,last_name AS last FROM employees WHERE id=? AND active=1").get(employeeId);
       if(!employee)throw Object.assign(new Error("Employé introuvable ou inactif"),{status:404});
@@ -490,7 +490,7 @@ const server = createServer(async (req, res) => {
       }catch(error){db.exec("ROLLBACK");throw error}
     }
     if (data.action === "updateAttendance") {
-      requireOperationalAdmin(req);
+      requireManualPointageAccess(req,data);
       const id=Number(data.id);
       if(!Number.isInteger(id)) throw new Error("Heure de pointage invalide");
       const record=db.prepare("SELECT id,employee_id AS employeeId,work_date AS workDate,type,timestamp,service FROM attendance WHERE id=?").get(id);
@@ -505,7 +505,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true});
     }
     if (data.action === "addManualDeparture") {
-      const current=requireOperationalAdmin(req),arrivalId=Number(data.arrivalId);
+      const current=requireManualPointageAccess(req,data),arrivalId=Number(data.arrivalId);
       if(!Number.isInteger(arrivalId)) throw new Error("Heure de départ invalide");
       const arrival=db.prepare("SELECT employee_id AS employeeId,work_date AS workDate,service,timestamp FROM attendance WHERE id=? AND type='Arrivée'").get(arrivalId);
       if(!arrival) throw Object.assign(new Error("Arrivée introuvable"),{status:404});
@@ -517,7 +517,7 @@ const server = createServer(async (req, res) => {
       return json(res,200,{success:true,id:Number(result.lastInsertRowid)});
     }
     if (data.action === "deleteAttendancePair") {
-      requireOperationalAdmin(req);
+      requireManualPointageAccess(req,data);
       const ids=Array.isArray(data.ids)?data.ids.map(Number).filter(Number.isInteger):[];
       if(!ids.length||ids.length>2) throw new Error("Horaire invalide");
       const remove=db.prepare("DELETE FROM attendance WHERE id=?");
