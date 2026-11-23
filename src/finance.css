@@ -4,4 +4,5 @@
 .finance-totals>div.error-total strong{color:#6550a8}
 .finance-kind.erreur{background:#eeeafd;color:#6550a8}
 @media(max-width:700px){.finance-totals{grid-template-columns:1fr}}
+.finance-month-picker{display:grid;gap:6px;font-size:11px;font-weight:700}.finance-month-picker input{padding:10px;border:1px solid #dedfe4;border-radius:8px;font:inherit}.finance-annual{margin:20px;padding:18px;border:1px solid #ead8b1;border-radius:12px;background:#fffbf3}.finance-annual h4{margin:0 0 14px}.finance-panel .finance-chart{overflow-x:auto;justify-content:flex-start}.finance-panel .chart-day{flex:1 0 24px;min-width:24px}.finance-history-title{flex-wrap:wrap}.finance-history-title label{font-size:11px;display:flex;align-items:center;gap:6px}
 .finance-history-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.finance-history-title h4{margin:0}.finance-history-title span{padding:5px 8px;border-radius:20px;background:#f2f0ed;color:#707580;font-size:8px;font-weight:800}
