@@ -1,4 +1,5 @@
 import type {MonthlyHoursReport} from './monthlyHoursExport';
+import {countedShiftMilliseconds} from '../server/closing-hours.js';
 
 export type GridEvent={name:string;type:string;timestamp:string;workDate:string};
 export function monthlyGrid(report:MonthlyHoursReport,events:GridEvent[],through:string){
@@ -18,7 +19,7 @@ export function monthlyGrid(report:MonthlyHoursReport,events:GridEvent[],through
         if(!Number.isFinite(time))throw Error('Horodatage invalide');
         if(event.type==='Arrivée')start=time;
         else if(event.type==='Départ'){
-          if(start!==null&&time>start&&time-start<86400000)ms+=time-start;
+          if(start!==null&&time>start&&time-start<86400000)ms+=countedShiftMilliseconds(start,time,date);
           start=null;
         }
       }
@@ -48,7 +49,7 @@ export function buildMonthlyGridPdf(report:MonthlyHoursReport,events:GridEvent[]
     for(let offset=0;offset<group.rows.length;offset+=28){
       const page=group.rows.slice(offset,offset+28);
       let stream=text(x,805,'BEEF HOUSE - HEURES POINTEES',18,true)+text(x,782,`${new Date(`${grid.month}-01T12:00:00Z`).toLocaleDateString('fr-FR',{month:'long',year:'numeric'}).toUpperCase()} - ${group.label}`,13,true);
-      stream+=text(x,764,'Durees en heures:minutes. Matin + soir. Sans comparaison au planning.',9);
+      stream+=text(x,764,'Durees en heures:minutes. Depuis 01/11/2026 : fin plafonnee a 00:00, samedi a 01:00.',9);
       let y=724;
       const drawRow=(name:string,values:string[],total:string,bold=false,header=false)=>{
         const fill=header?'0.91 0.85 0.85':bold?'0.98 0.93 0.81':'1 1 1';

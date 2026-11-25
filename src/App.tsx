@@ -123,7 +123,7 @@ function AdminApp(){
     </form></section>
    </div>:tab==="hours"?<div className="grid details admin-single-panel">
     <section className="card report-card">
-      <div className="cardhead"><span>1</span><div><h2>Heures des employés</h2><p>Consulter les heures pointées et télécharger le relevé.</p></div></div>
+      <div className="cardhead"><span>1</span><div><h2>Heures des employés</h2><p>Depuis le 01/11/2026 : totaux plafonnés à minuit, samedi à 01:00. Les arrivées et départs affichés restent réels.</p></div></div>
       <div className="report-tools"><label>Date<input type="date" value={reportDate} onChange={e=>setReportDate(e.target.value)}/></label><button disabled={busy} onClick={downloadReport}>{busy?"Chargement…":"↓ Télécharger le PDF"}</button></div>
       <div className="report-table"><table><thead><tr><th>Employé</th><th>Début 1</th><th>Fin 1</th><th>MIDI</th><th>Début 2</th><th>Fin 2</th><th>SOIR</th><th>Total</th></tr></thead><tbody>{team.map(p=>{const s=summary(p);return <tr key={`${p.first}-${p.last}`}><td>{s.name}</td><td>{s.start1}</td><td>{s.end1}</td><td>{s.hours1.toFixed(2)}</td><td>{s.start2}</td><td>{s.end2}</td><td>{s.hours2.toFixed(2)}</td><td><b>{(s.hours1+s.hours2).toFixed(2)}</b></td></tr>})}</tbody></table></div>
     </section>

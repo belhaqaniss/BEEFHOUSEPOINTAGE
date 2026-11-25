@@ -23,6 +23,12 @@ test('cumulative rounding and DST match monthly report',()=>{
 test('reject mismatching totals instead of exporting misleading cells',()=>{
   assert.throws(()=>monthlyGrid(report([employee(1,10)]),[],'2026-10-31'),/diffèrent/);
 });
+test('November grid applies the Saturday closing limit and keeps original events',()=>{
+  const events=[event(1,'Arrivée','2026-11-07T20:00:00+01:00','2026-11-07'),event(1,'Départ','2026-11-08T02:30:00+01:00','2026-11-07')];
+  const grid=monthlyGrid(report([employee(1,300)],'2026-11'),events,'2026-11-30');
+  assert.equal(grid.rows[0].days[6].minutes,300);assert.equal(grid.total,300);
+  assert.equal(events[1].timestamp,'2026-11-08T02:30:00+01:00');
+});
 test('paginate large teams and repeat all 31 day headers',()=>{
   const employees=Array.from({length:65},(_,i)=>employee(i,0,i<35?'Salle':'Cuisine'));
   const bytes=buildMonthlyGridPdf(report(employees),[],'2026-10-31');

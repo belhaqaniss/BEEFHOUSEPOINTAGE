@@ -1,3 +1,4 @@
+import {countedShiftMilliseconds} from './closing-hours.js';
 const parisHour = timestamp => Number(new Intl.DateTimeFormat("fr-FR", {
   timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23"
 }).formatToParts(new Date(timestamp)).find(part => part.type === "hour")?.value || 0);
@@ -23,8 +24,9 @@ export function buildEmployeeRangeReport(events, startDate, endDate) {
     const open = openByDate.get(event.workDate);
     openByDate.delete(event.workDate);
     if (!open) continue;
-    const difference = new Date(event.timestamp).getTime() - new Date(open.start).getTime();
-    if (difference <= 0 || difference >= 86_400_000) continue;
+    const rawDifference = new Date(event.timestamp).getTime() - new Date(open.start).getTime();
+    if (rawDifference <= 0 || rawDifference >= 86_400_000) continue;
+    const difference=countedShiftMilliseconds(open.start,event.timestamp,event.workDate);
     totalMilliseconds += difference;
     if (open.service === "matin") morningMilliseconds += difference;
     completedDays.add(event.workDate);
@@ -61,7 +63,7 @@ export function buildEmployeeMonthReport(events, month, throughDate) {
         const difference = new Date(event.timestamp).getTime() - new Date(open.start).getTime();
         if (difference > 0 && difference < 86_400_000) {
           open.end = event.timestamp;
-          day.milliseconds += difference;
+          day.milliseconds += countedShiftMilliseconds(open.start,event.timestamp,event.workDate);
         }
       }
     }
@@ -83,7 +85,7 @@ export function buildEmployeeMonthReport(events, month, throughDate) {
     if (completed.length) completedDays++;
     completedShifts += completed.length;
     morningMilliseconds += completed.filter(shift => shift.service === "matin")
-      .reduce((sum, shift) => sum + new Date(shift.end).getTime() - new Date(shift.start).getTime(), 0);
+      .reduce((sum, shift) => sum + countedShiftMilliseconds(shift.start,shift.end,date), 0);
     days.push({ date, shifts: day.shifts, minutes });
   }
   const totalMinutes = roundedMinutes(totalMilliseconds);

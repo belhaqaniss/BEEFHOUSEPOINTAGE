@@ -1,3 +1,4 @@
+import {countedShiftMilliseconds} from '../server/closing-hours.js';
 export type ExcelPerson={first:string;last:string;role?:string};
 export type ExcelAttendance={name:string;type:"Arrivée"|"Départ";timestamp:string;workDate:string;scheduledStartMinutes?:number|null;scheduledMorningStartMinutes?:number|null;scheduledEveningStartMinutes?:number|null};
 
@@ -7,7 +8,7 @@ export const employeeSummary=(person:ExcelPerson,records:ExcelAttendance[],date:
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts:{start?:Date;end?:Date;period:"matin"|"soir"}[]=[];
   for(const event of events){if(event.type==="Arrivée"){const start=new Date(event.timestamp),arrivalTime=parisTime(start),period=arrivalTime.hour<7||arrivalTime.hour>=13?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>shift.start&&!shift.end);if(open)open.end=new Date(event.timestamp)}}
   const time=(value?:Date)=>value?new Intl.DateTimeFormat("fr-FR",{timeZone:"Europe/Paris",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(value):"";
-  const total=(period:"matin"|"soir")=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.start&&shift.end&&shift.end.getTime()>shift.start.getTime()&&shift.end.getTime()-shift.start.getTime()<86_400_000);return{start:time(own[0]?.start),end:time(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+(shift.end!.getTime()-shift.start!.getTime())/3_600_000,0)}};
+  const total=(period:"matin"|"soir")=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.start&&shift.end&&shift.end.getTime()>shift.start.getTime()&&shift.end.getTime()-shift.start.getTime()<86_400_000);return{start:time(own[0]?.start),end:time(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+countedShiftMilliseconds(shift.start!,shift.end!,date)/3_600_000,0)}};
   const morning=total("matin"),evening=total("soir");
   return{name:`${person.first} ${person.last}`,start1:morning.start,end1:morning.end,hours1:morning.hours,start2:evening.start,end2:evening.end,hours2:evening.hours,total:morning.hours+evening.hours};
 };

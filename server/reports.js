@@ -1,3 +1,4 @@
+import {countedShiftMilliseconds} from './closing-hours.js';
 const ascii=value=>String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\x20-\x7E]/g,"-");
 const esc=value=>ascii(value).replace(/([\\()])/g,"\\$1");
 const text=(x,y,size,value,bold=false,color="0.12 0.12 0.14")=>`${color} rg BT /${bold?"F2":"F1"} ${size} Tf ${x} ${y} Td (${esc(value)}) Tj ET\n`;
@@ -33,7 +34,7 @@ const parisMinutes=value=>{const [hour,minute]=parisClock(value).split(":").map(
 const summary=(person,records,date)=>{
   const events=records.filter(record=>record.name===`${person.first} ${person.last}`&&record.workDate===date).sort((a,b)=>a.timestamp.localeCompare(b.timestamp)),shifts=[];
   for(const event of events)if(event.type==="Arrivée"){const start=new Date(event.timestamp),minutes=parisMinutes(event.timestamp),period=minutes<420||minutes>=780?"soir":"matin";shifts.push({start,period})}else{const open=[...shifts].reverse().find(shift=>!shift.end);if(open)open.end=new Date(event.timestamp)}
-  const clock=value=>value?parisClock(value):"",total=period=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.end&&shift.end-shift.start>0&&shift.end-shift.start<86400000);return{start:clock(own[0]?.start),end:clock(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+(shift.end-shift.start)/3600000,0)}},morning=total("matin"),evening=total("soir");
+  const clock=value=>value?parisClock(value):"",total=period=>{const own=shifts.filter(shift=>shift.period===period),completed=own.filter(shift=>shift.end&&shift.end-shift.start>0&&shift.end-shift.start<86400000);return{start:clock(own[0]?.start),end:clock(completed.at(-1)?.end),hours:completed.reduce((sum,shift)=>sum+countedShiftMilliseconds(shift.start,shift.end,date)/3600000,0)}},morning=total("matin"),evening=total("soir");
   return {name:`${person.first} ${person.last}`,start1:morning.start,end1:morning.end,hours1:morning.hours,start2:evening.start,end2:evening.end,hours2:evening.hours};
 };
 
