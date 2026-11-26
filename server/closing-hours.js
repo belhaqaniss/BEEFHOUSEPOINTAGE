@@ -21,3 +21,9 @@ export function countedShiftMilliseconds(start,end,workDate){
   if(!Number.isFinite(raw)||raw<=0||raw>=86400000)return 0;
   return Math.max(0,Math.min(b,closingLimit(workDate))-a);
 }
+// Presentation only: the stored timestamp is never modified.
+export function countedDeparture(timestamp,workDate){
+  const actual=Date.parse(timestamp);
+  if(!Number.isFinite(actual))throw Error('Horodatage de départ invalide');
+  return new Date(Math.min(actual,closingLimit(workDate))).toISOString();
+}

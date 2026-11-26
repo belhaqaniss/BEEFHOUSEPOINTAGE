@@ -1,3 +1,4 @@
+import {countedDeparture} from "../server/closing-hours.js";
 export type EmployeeMonthReport = {
   month: string;
   days: Array<{
@@ -87,7 +88,7 @@ export function buildEmployeeHoursPdf(employee: EmployeeName, report: EmployeeMo
         stream += text(x + 11, 683, 8, label, true, index === 2 ? "0.67 0.14 0.18" : "0.39 0.42 0.46");
         stream += text(x + 11, 660, 17, value, true, index === 2 ? "0.67 0.14 0.18" : "0.13 0.15 0.18");
       });
-      stream += text(left, 630, 8, `${report.completedDays} journees terminees  |  ${report.completedShifts} services termines  |  Pointages reels uniquement`, false, "0.39 0.42 0.46");
+      stream += text(left, 630, 8, `${report.completedDays} journees terminees  |  ${report.completedShifts} services termines  |  Heures comptabilisees`, false, "0.39 0.42 0.46");
       y = 604;
     } else {
       stream += text(190, 802, 10, `${employee.first} ${employee.last} - ${monthLabel(report.month)} (suite)`, true);
@@ -101,8 +102,8 @@ export function buildEmployeeHoursPdf(employee: EmployeeName, report: EmployeeMo
   };
   addPage();
   for (const [index, day] of report.days.entries()) {
-    const morning = day.shifts.filter(shift => shift.service === "matin").map(shift => `${localTime(shift.start)} - ${shift.end ? localTime(shift.end) : day.date === today ? "en cours" : "depart absent"}`);
-    const evening = day.shifts.filter(shift => shift.service === "soir").map(shift => `${localTime(shift.start)} - ${shift.end ? localTime(shift.end) : day.date === today ? "en cours" : "depart absent"}`);
+    const morning = day.shifts.filter(shift => shift.service === "matin").map(shift => `${localTime(shift.start)} - ${shift.end ? localTime(countedDeparture(shift.end,day.date)) : day.date === today ? "en cours" : "depart absent"}`);
+    const evening = day.shifts.filter(shift => shift.service === "soir").map(shift => `${localTime(shift.start)} - ${shift.end ? localTime(countedDeparture(shift.end,day.date)) : day.date === today ? "en cours" : "depart absent"}`);
     const lines = Math.max(1, morning.length, evening.length);
     const rowHeight = Math.max(17, lines * 13 + 4);
     if (y - rowHeight < 106) addPage();
@@ -120,7 +121,7 @@ export function buildEmployeeHoursPdf(employee: EmployeeName, report: EmployeeMo
   if (y < 116) addPage();
   stream += text(left, y - 20, 8.7, "A noter", true);
   stream += text(left, y - 35, 7.5, "Services sans depart non comptes. Un jour sans pointage n'est pas une preuve d'absence.", false, "0.39 0.42 0.46");
-  stream += text(left, y - 49, 7.5, "Temps brut entre arrivee et depart, sans deduction de pause ; le planning n'entre pas dans le total.", false, "0.39 0.42 0.46");
+  stream += text(left, y - 49, 7.5, "Depuis le 01/11/2026 : departs plafonnes a 00:00, samedi a 01:00. Pointages d'origine conserves.", false, "0.39 0.42 0.46");
   pages.push(stream);
   const finished = pages.map((content, index) => content + line(left, 51, right, 51) +
     text(left, 38, 7, "Source : pointage BEEF HOUSE. Document de controle, non bulletin de paie.", false, "0.39 0.42 0.46") +
